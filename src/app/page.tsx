@@ -42,7 +42,7 @@ const features = [
 ];
 
 const styles = [
-  { name: 'Forbes', icon: Newspaper, color: 'from-amber-500 to-orange-600', desc: 'ビジネス向け' },
+  { name: 'Forbes風', icon: Newspaper, color: 'from-amber-500 to-orange-600', desc: 'ビジネス向け' },
   { name: 'note', icon: PenTool, color: 'from-green-500 to-emerald-600', desc: '親しみやすい' },
   { name: 'ニュース', icon: FileText, color: 'from-blue-500 to-cyan-600', desc: '客観的' },
   { name: 'ブログ', icon: BookOpen, color: 'from-purple-500 to-pink-600', desc: 'SEO重視' },

@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 
 const STYLES = [
-  { id: 'forbes', name: 'Forbes', description: 'ビジネス向け洗練文体', icon: Newspaper, color: 'from-amber-500 to-orange-600' },
+  { id: 'forbes', name: 'Forbes風', description: 'ビジネス向け洗練文体', icon: Newspaper, color: 'from-amber-500 to-orange-600' },
   { id: 'note', name: 'note', description: '親しみやすい文体', icon: PenTool, color: 'from-green-500 to-emerald-600' },
   { id: 'news', name: 'ニュース', description: '客観的で簡潔', icon: FileText, color: 'from-blue-500 to-cyan-600' },
   { id: 'blog', name: 'ブログ', description: 'SEO・具体例重視', icon: BookOpen, color: 'from-purple-500 to-pink-600' },
