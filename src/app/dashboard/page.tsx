@@ -135,7 +135,7 @@ export default function Home() {
     if (!youtubeUrl) return;
 
     setIsTranscribing(true);
-    setTranscribeStatus('YouTube動画をダウンロード中...');
+    setTranscribeStatus('YouTube字幕を取得中...');
 
     try {
       const res = await fetch('/api/youtube', {
@@ -456,9 +456,12 @@ export default function Home() {
                 {inputType === 'youtube' && (
                   <div>
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2 p-4 bg-red-50 rounded-xl border border-red-200">
-                        <Youtube className="w-6 h-6 text-red-500" />
-                        <span className="text-sm text-red-700">YouTube動画から文字起こし</span>
+                      <div className="p-4 bg-red-50 rounded-xl border border-red-200">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Youtube className="w-5 h-5 text-red-500" />
+                          <span className="text-sm font-medium text-red-700">YouTube字幕から取得</span>
+                        </div>
+                        <p className="text-xs text-red-600">字幕（自動生成含む）がある動画に対応</p>
                       </div>
                       <input
                         type="text"
