@@ -79,7 +79,7 @@ export default function LoginPage() {
           <p className="text-slate-500 mt-1">音声からプロ品質の記事を自動生成</p>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-8">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-5 sm:p-8">
           <div className="flex bg-slate-100 rounded-xl p-1 mb-6">
             <button
               onClick={() => setIsLogin(true)}

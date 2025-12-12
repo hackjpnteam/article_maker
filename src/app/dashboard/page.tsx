@@ -289,75 +289,76 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
       {/* Header */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-xl shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-xl shadow-sm sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 sm:py-4">
+          {/* Top Row - Logo and User Menu */}
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-                <Sparkles className="w-5 h-5 text-white" />
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-800">BackNote</h1>
-                <p className="text-xs text-slate-500">音声から記事を自動生成</p>
+                <h1 className="text-lg sm:text-xl font-bold text-slate-800">BackNote</h1>
+                <p className="text-xs text-slate-500 hidden sm:block">音声から記事を自動生成</p>
               </div>
-            </div>
-
-            {/* Tab Navigation */}
-            <div className="flex bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setActiveTab('create')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'create'
-                    ? 'bg-white text-slate-800 shadow-md'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Plus className="w-4 h-4" />
-                新規作成
-              </button>
-              <button
-                onClick={() => setActiveTab('history')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  activeTab === 'history'
-                    ? 'bg-white text-slate-800 shadow-md'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <History className="w-4 h-4" />
-                履歴
-                {articles.length > 0 && (
-                  <span className="ml-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 text-xs">
-                    {articles.length}
-                  </span>
-                )}
-              </button>
             </div>
 
             {/* User Menu */}
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-xl">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-xl">
                 <User className="w-4 h-4 text-slate-500" />
                 <span className="text-sm font-medium text-slate-700">{session.user?.name}</span>
               </div>
               <button
                 onClick={() => signOut({ callbackUrl: '/login' })}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
+                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
               >
                 <LogOut className="w-4 h-4" />
-                ログアウト
+                <span className="hidden sm:inline">ログアウト</span>
               </button>
             </div>
+          </div>
+
+          {/* Tab Navigation - Below on all screens */}
+          <div className="flex bg-slate-100 rounded-xl p-1 mt-3">
+            <button
+              onClick={() => setActiveTab('create')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'create'
+                  ? 'bg-white text-slate-800 shadow-md'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <Plus className="w-4 h-4" />
+              新規作成
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'history'
+                  ? 'bg-white text-slate-800 shadow-md'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <History className="w-4 h-4" />
+              履歴
+              {articles.length > 0 && (
+                <span className="ml-1 px-2 py-0.5 rounded-full bg-violet-100 text-violet-600 text-xs">
+                  {articles.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8">
         {activeTab === 'create' ? (
-          <div className="grid grid-cols-1 xl:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 sm:gap-6">
             {/* Left Panel - Input */}
-            <div className="xl:col-span-2 space-y-5">
+            <div className="lg:col-span-2 space-y-4 sm:space-y-5">
               {/* Input Type Toggle */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
                 <div className="flex gap-2 mb-5">
                   <button
                     onClick={() => setInputType('audio')}
@@ -497,10 +498,10 @@ export default function Home() {
               </div>
 
               {/* Transcription Text */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
                 <div className="flex items-center justify-between mb-3">
                   <label className="text-sm font-medium text-slate-700">
-                    文字起こしテキスト
+                    文字起こし
                   </label>
                   <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">
                     {transcription.length.toLocaleString()} 文字
@@ -515,9 +516,9 @@ export default function Home() {
               </div>
 
               {/* Style Selection */}
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
-                <h3 className="text-sm font-medium text-slate-700 mb-4">文章スタイル</h3>
-                <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
+                <h3 className="text-sm font-medium text-slate-700 mb-3 sm:mb-4">文章スタイル</h3>
+                <div className="grid grid-cols-2 sm:grid-cols-2 gap-2">
                   {STYLES.map((s) => {
                     const Icon = s.icon;
                     return (
@@ -595,8 +596,8 @@ export default function Home() {
             </div>
 
             {/* Right Panel - Output */}
-            <div className="xl:col-span-3">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 h-full">
+            <div className="lg:col-span-3">
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5 h-full">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3">
                     <h3 className="font-semibold text-slate-800">生成された記事</h3>
@@ -713,7 +714,7 @@ export default function Home() {
                   return (
                     <div
                       key={article.id}
-                      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 hover:border-slate-300 hover:shadow-md transition-all group"
+                      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5 hover:border-slate-300 hover:shadow-md transition-all group"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">

@@ -66,18 +66,18 @@ export default function LandingPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-violet-50">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <Sparkles className="w-5 h-5 text-white" />
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
             </div>
-            <span className="text-xl font-bold text-slate-800">BackNote</span>
+            <span className="text-lg sm:text-xl font-bold text-slate-800">BackNote</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4">
             {session ? (
               <Link
                 href="/dashboard"
-                className="px-5 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white font-medium rounded-xl hover:shadow-lg hover:shadow-violet-500/25 transition-all"
+                className="px-3 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm sm:text-base font-medium rounded-xl hover:shadow-lg hover:shadow-violet-500/25 transition-all"
               >
                 ダッシュボード
               </Link>
@@ -85,13 +85,13 @@ export default function LandingPage() {
               <>
                 <Link
                   href="/login"
-                  className="px-4 py-2 text-slate-600 font-medium hover:text-slate-800 transition-colors"
+                  className="hidden sm:block px-4 py-2 text-slate-600 font-medium hover:text-slate-800 transition-colors"
                 >
                   ログイン
                 </Link>
                 <Link
                   href="/login"
-                  className="px-5 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white font-medium rounded-xl hover:shadow-lg hover:shadow-violet-500/25 transition-all"
+                  className="px-3 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white text-sm sm:text-base font-medium rounded-xl hover:shadow-lg hover:shadow-violet-500/25 transition-all"
                 >
                   無料で始める
                 </Link>
@@ -102,17 +102,17 @@ export default function LandingPage() {
       </header>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 px-6">
+      <section className="pt-24 sm:pt-32 pb-12 sm:pb-20 px-4 sm:px-6">
         <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-violet-100 rounded-full text-violet-700 text-sm font-medium mb-6">
-            <Zap className="w-4 h-4" />
+          <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-violet-100 rounded-full text-violet-700 text-xs sm:text-sm font-medium mb-4 sm:mb-6">
+            <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
             AIで記事作成を革新
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold text-slate-800 mb-6 leading-tight">
-            音声を<span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-500 to-purple-600">プロ品質の記事</span>に<br />自動変換
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-slate-800 mb-4 sm:mb-6 leading-tight">
+            音声を<span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-500 to-purple-600">プロ品質の記事</span>に<br className="hidden sm:block" />自動変換
           </h1>
-          <p className="text-xl text-slate-600 mb-10 max-w-2xl mx-auto leading-relaxed">
-            会議録音、インタビュー、ポッドキャストを<br />
+          <p className="text-base sm:text-xl text-slate-600 mb-8 sm:mb-10 max-w-2xl mx-auto leading-relaxed">
+            会議録音、インタビュー、ポッドキャストを<br className="hidden sm:block" />
             Forbes風からブログまで、様々なスタイルの記事に自動生成
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -132,7 +132,7 @@ export default function LandingPage() {
       </section>
 
       {/* Demo Preview */}
-      <section className="pb-20 px-6">
+      <section className="pb-12 sm:pb-20 px-4 sm:px-6">
         <div className="max-w-5xl mx-auto">
           <div className="bg-white rounded-3xl shadow-2xl shadow-slate-200/50 border border-slate-200 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 flex items-center gap-2">
@@ -177,10 +177,10 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section className="py-20 px-6 bg-white">
+      <section className="py-12 sm:py-20 px-4 sm:px-6 bg-white">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-800 mb-4">
+          <div className="text-center mb-8 sm:mb-16">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 mb-4">
               なぜBackNoteなのか
             </h2>
             <p className="text-lg text-slate-600">記事作成の常識を変える機能</p>
@@ -200,10 +200,10 @@ export default function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section className="py-20 px-6">
+      <section className="py-12 sm:py-20 px-4 sm:px-6">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-800 mb-4">
+          <div className="text-center mb-8 sm:mb-16">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 mb-4">
               4ステップで完了
             </h2>
             <p className="text-lg text-slate-600">シンプルな操作で高品質な記事を</p>
@@ -228,10 +228,10 @@ export default function LandingPage() {
       </section>
 
       {/* Styles */}
-      <section className="py-20 px-6 bg-gradient-to-br from-violet-50 to-purple-50">
+      <section className="py-12 sm:py-20 px-4 sm:px-6 bg-gradient-to-br from-violet-50 to-purple-50">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-slate-800 mb-4">
+          <div className="text-center mb-8 sm:mb-16">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-800 mb-4">
               多彩な文章スタイル
             </h2>
             <p className="text-lg text-slate-600">用途に合わせた最適なトーンで</p>
@@ -253,10 +253,10 @@ export default function LandingPage() {
       </section>
 
       {/* CTA */}
-      <section className="py-20 px-6">
+      <section className="py-12 sm:py-20 px-4 sm:px-6">
         <div className="max-w-4xl mx-auto">
           <div className="bg-gradient-to-br from-violet-500 to-purple-600 rounded-3xl p-12 text-center text-white">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-4">
               今すぐ始めよう
             </h2>
             <p className="text-lg text-violet-100 mb-8 max-w-xl mx-auto">
