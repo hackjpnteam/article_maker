@@ -39,20 +39,30 @@ export async function POST(request: NextRequest) {
 
     // Try to get Japanese transcript first, then fall back to any available
     let transcript;
+    let errorMessage = '';
     try {
       transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ja' });
-    } catch {
+      console.log('Got Japanese transcript');
+    } catch (jaError) {
+      console.log('Japanese transcript not available:', (jaError as Error).message);
       try {
         // Try English if Japanese not available
         transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
-      } catch {
+        console.log('Got English transcript');
+      } catch (enError) {
+        console.log('English transcript not available:', (enError as Error).message);
         // Try any available language
         try {
           transcript = await YoutubeTranscript.fetchTranscript(videoId);
+          console.log('Got default transcript');
         } catch (finalError) {
-          console.error('Transcript fetch error:', finalError);
+          errorMessage = (finalError as Error).message;
+          console.error('All transcript fetch attempts failed:', errorMessage);
           return NextResponse.json(
-            { error: 'この動画の字幕を取得できませんでした。字幕が有効な動画を選んでください。' },
+            {
+              error: `この動画の字幕を取得できませんでした。字幕が有効な動画を選んでください。(${errorMessage})`,
+              videoId
+            },
             { status: 400 }
           );
         }
