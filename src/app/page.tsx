@@ -17,13 +17,14 @@ import {
   GraduationCap,
   Play,
   Scale,
+  Youtube,
 } from 'lucide-react';
 
 const features = [
   {
     icon: Mic,
-    title: '音声から記事へ',
-    description: '1時間以上の長時間音声も自動分割で対応。会議やインタビューを瞬時にテキスト化。',
+    title: '音声・YouTubeから記事へ',
+    description: '音声ファイルやYouTube URLから文字起こし。長時間動画も自動分割で対応。',
   },
   {
     icon: Zap,

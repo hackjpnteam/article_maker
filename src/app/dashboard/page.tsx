@@ -29,6 +29,7 @@ import {
   LogOut,
   User,
   Shield,
+  Youtube,
 } from 'lucide-react';
 
 const STYLES = [
@@ -45,8 +46,9 @@ export default function Home() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
-  const [inputType, setInputType] = useState<'audio' | 'text'>('audio');
+  const [inputType, setInputType] = useState<'audio' | 'youtube' | 'text'>('audio');
   const [file, setFile] = useState<File | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
   const [transcription, setTranscription] = useState('');
   const [style, setStyle] = useState('forbes');
   const [customPrompt, setCustomPrompt] = useState('');
@@ -122,6 +124,35 @@ export default function Home() {
       }
     } catch (error) {
       alert('文字起こしに失敗しました');
+      console.error(error);
+    } finally {
+      setIsTranscribing(false);
+      setTimeout(() => setTranscribeStatus(''), 3000);
+    }
+  };
+
+  const handleYoutubeTranscribe = async () => {
+    if (!youtubeUrl) return;
+
+    setIsTranscribing(true);
+    setTranscribeStatus('YouTube動画をダウンロード中...');
+
+    try {
+      const res = await fetch('/api/youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: youtubeUrl }),
+      });
+
+      const data = await res.json();
+      if (data.error) {
+        alert(data.error);
+      } else {
+        setTranscription(data.text);
+        setTranscribeStatus('YouTube文字起こし完了');
+      }
+    } catch (error) {
+      alert('YouTube文字起こしに失敗しました');
       console.error(error);
     } finally {
       setIsTranscribing(false);
@@ -329,18 +360,29 @@ export default function Home() {
                 <div className="flex gap-2 mb-5">
                   <button
                     onClick={() => setInputType('audio')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
                       inputType === 'audio'
                         ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/25'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     <Mic className="w-4 h-4" />
-                    音声ファイル
+                    音声
+                  </button>
+                  <button
+                    onClick={() => setInputType('youtube')}
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      inputType === 'youtube'
+                        ? 'bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/25'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Youtube className="w-4 h-4" />
+                    YouTube
                   </button>
                   <button
                     onClick={() => setInputType('text')}
-                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all ${
+                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium transition-all ${
                       inputType === 'text'
                         ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-lg shadow-violet-500/25'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -407,6 +449,44 @@ export default function Home() {
                     </button>
                     {transcribeStatus && !isTranscribing && (
                       <p className="text-center text-sm text-emerald-600 mt-2">{transcribeStatus}</p>
+                    )}
+                  </div>
+                )}
+
+                {inputType === 'youtube' && (
+                  <div>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 p-4 bg-red-50 rounded-xl border border-red-200">
+                        <Youtube className="w-6 h-6 text-red-500" />
+                        <span className="text-sm text-red-700">YouTube動画から文字起こし</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={youtubeUrl}
+                        onChange={(e) => setYoutubeUrl(e.target.value)}
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-300"
+                      />
+                    </div>
+                    <button
+                      onClick={handleYoutubeTranscribe}
+                      disabled={!youtubeUrl || isTranscribing}
+                      className="w-full mt-4 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-red-500 to-red-600 text-white shadow-lg shadow-red-500/25 hover:shadow-red-500/40"
+                    >
+                      {isTranscribing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          {transcribeStatus || '処理中...'}
+                        </>
+                      ) : (
+                        <>
+                          <Youtube className="w-4 h-4" />
+                          YouTube文字起こし
+                        </>
+                      )}
+                    </button>
+                    {transcribeStatus && !isTranscribing && (
+                      <p className="text-center text-sm text-red-600 mt-2">{transcribeStatus}</p>
                     )}
                   </div>
                 )}
