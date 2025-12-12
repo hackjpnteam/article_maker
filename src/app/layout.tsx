@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Article Generator - 音声・テキストから記事を自動生成",
-  description: "音声ファイルや文字起こしテキストから、Forbes風やnote風など様々なスタイルの記事を自動生成するサービス",
+  title: "BackNote - 音声からプロ品質の記事を自動生成",
+  description: "会議録音、インタビュー、ポッドキャストを、Forbes風からブログまで様々なスタイルの記事に自動変換。AIが高品質な記事を生成します。",
 };
 
 export default function RootLayout({

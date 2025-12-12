@@ -61,7 +61,7 @@ export default function Home() {
 
   useEffect(() => {
     if (status === 'unauthenticated') {
-      router.push('/login');
+      router.push('/landing');
     }
   }, [status, router]);
 
@@ -263,8 +263,8 @@ export default function Home() {
                 <Sparkles className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-slate-800">Article Generator</h1>
-                <p className="text-xs text-slate-500">AI-Powered Content Creation</p>
+                <h1 className="text-xl font-bold text-slate-800">BackNote</h1>
+                <p className="text-xs text-slate-500">音声から記事を自動生成</p>
               </div>
             </div>
 

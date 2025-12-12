@@ -75,8 +75,8 @@ export default function LoginPage() {
           <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-xl shadow-violet-500/25 mb-4">
             <Sparkles className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-800">Article Generator</h1>
-          <p className="text-slate-500 mt-1">AI-Powered Content Creation</p>
+          <h1 className="text-2xl font-bold text-slate-800">BackNote</h1>
+          <p className="text-slate-500 mt-1">音声からプロ品質の記事を自動生成</p>
         </div>
 
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xl p-8">
