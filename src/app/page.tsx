@@ -16,6 +16,7 @@ import {
   BookOpen,
   GraduationCap,
   Play,
+  Scale,
 } from 'lucide-react';
 
 const features = [
@@ -47,6 +48,7 @@ const styles = [
   { name: 'ニュース', icon: FileText, color: 'from-blue-500 to-cyan-600', desc: '客観的' },
   { name: 'ブログ', icon: BookOpen, color: 'from-purple-500 to-pink-600', desc: 'SEO重視' },
   { name: '学術', icon: GraduationCap, color: 'from-slate-500 to-gray-600', desc: '論理的' },
+  { name: '訴状・法律', icon: Scale, color: 'from-red-500 to-rose-600', desc: '訴訟用' },
 ];
 
 const steps = [

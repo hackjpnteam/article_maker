@@ -28,6 +28,7 @@ import {
   History,
   LogOut,
   User,
+  Shield,
 } from 'lucide-react';
 
 const STYLES = [
@@ -36,7 +37,8 @@ const STYLES = [
   { id: 'news', name: 'ニュース', description: '客観的で簡潔', icon: FileText, color: 'from-blue-500 to-cyan-600' },
   { id: 'blog', name: 'ブログ', description: 'SEO・具体例重視', icon: BookOpen, color: 'from-purple-500 to-pink-600' },
   { id: 'academic', name: '学術', description: '論理的・体系的', icon: GraduationCap, color: 'from-slate-500 to-gray-600' },
-  { id: 'custom', name: 'カスタム', description: '独自プロンプト', icon: Settings2, color: 'from-rose-500 to-red-600' },
+  { id: 'legal', name: '訴状・法律', description: '訴訟用文書作成', icon: Shield, color: 'from-red-500 to-rose-600' },
+  { id: 'custom', name: 'カスタム', description: '独自プロンプト', icon: Settings2, color: 'from-gray-500 to-slate-600' },
 ];
 
 export default function Home() {
