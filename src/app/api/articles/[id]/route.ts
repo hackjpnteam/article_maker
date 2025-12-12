@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
 import { connectToDatabase } from '@/lib/mongodb';
+import { authOptions } from '@/lib/auth';
 
 // GET: 個別記事取得
 export async function GET(
@@ -7,9 +9,19 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'ログインが必要です' },
+        { status: 401 }
+      );
+    }
+
+    const userId = (session.user as { id?: string }).id;
     const { id } = await params;
     const { db } = await connectToDatabase();
-    const article = await db.collection('articles').findOne({ id });
+    const article = await db.collection('articles').findOne({ id, userId });
 
     if (!article) {
       return NextResponse.json(
@@ -34,12 +46,22 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'ログインが必要です' },
+        { status: 401 }
+      );
+    }
+
+    const userId = (session.user as { id?: string }).id;
     const { id } = await params;
     const { title, content } = await request.json();
     const { db } = await connectToDatabase();
 
     const result = await db.collection('articles').findOneAndUpdate(
-      { id },
+      { id, userId },
       {
         $set: {
           title,
@@ -73,10 +95,20 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'ログインが必要です' },
+        { status: 401 }
+      );
+    }
+
+    const userId = (session.user as { id?: string }).id;
     const { id } = await params;
     const { db } = await connectToDatabase();
 
-    const result = await db.collection('articles').deleteOne({ id });
+    const result = await db.collection('articles').deleteOne({ id, userId });
 
     if (result.deletedCount === 0) {
       return NextResponse.json(

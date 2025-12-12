@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { useSession, signOut } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
 import { Article } from '@/lib/types';
 import {
   Mic,
@@ -24,6 +26,8 @@ import {
   FileAudio,
   Plus,
   History,
+  LogOut,
+  User,
 } from 'lucide-react';
 
 const STYLES = [
@@ -36,6 +40,8 @@ const STYLES = [
 ];
 
 export default function Home() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'create' | 'history'>('create');
   const [inputType, setInputType] = useState<'audio' | 'text'>('audio');
   const [file, setFile] = useState<File | null>(null);
@@ -54,8 +60,16 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchArticles();
-  }, []);
+    if (status === 'unauthenticated') {
+      router.push('/login');
+    }
+  }, [status, router]);
+
+  useEffect(() => {
+    if (session) {
+      fetchArticles();
+    }
+  }, [session]);
 
   const fetchArticles = async () => {
     try {
@@ -223,6 +237,21 @@ export default function Home() {
 
   const selectedStyle = STYLES.find(s => s.id === style);
 
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-violet-500 mx-auto mb-4" />
+          <p className="text-slate-500">読み込み中...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100">
       {/* Header */}
@@ -267,6 +296,21 @@ export default function Home() {
                     {articles.length}
                   </span>
                 )}
+              </button>
+            </div>
+
+            {/* User Menu */}
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-xl">
+                <User className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-medium text-slate-700">{session.user?.name}</span>
+              </div>
+              <button
+                onClick={() => signOut({ callbackUrl: '/login' })}
+                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+                ログアウト
               </button>
             </div>
           </div>
