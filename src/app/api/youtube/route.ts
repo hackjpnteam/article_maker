@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
+import ytdl from '@distube/ytdl-core';
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 function extractVideoId(url: string): string | null {
   const patterns = [
@@ -14,6 +20,86 @@ function extractVideoId(url: string): string | null {
     }
   }
   return null;
+}
+
+async function tryGetCaptions(videoId: string): Promise<string | null> {
+  try {
+    // Try Japanese first
+    let transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ja' });
+    if (transcript && transcript.length > 0) {
+      console.log('Got Japanese captions');
+      return transcript.map((s: { text: string }) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+    }
+  } catch {
+    // Try English
+    try {
+      const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
+      if (transcript && transcript.length > 0) {
+        console.log('Got English captions');
+        return transcript.map((s: { text: string }) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+      }
+    } catch {
+      // Try any language
+      try {
+        const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+        if (transcript && transcript.length > 0) {
+          console.log('Got default captions');
+          return transcript.map((s: { text: string }) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+        }
+      } catch {
+        console.log('No captions available');
+      }
+    }
+  }
+  return null;
+}
+
+async function transcribeWithWhisper(videoId: string): Promise<string> {
+  console.log('Downloading audio from YouTube...');
+
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  // Get audio stream
+  const info = await ytdl.getInfo(videoUrl);
+  const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio' });
+
+  if (!audioFormat) {
+    throw new Error('No audio format available');
+  }
+
+  console.log('Audio format:', audioFormat.mimeType, 'bitrate:', audioFormat.audioBitrate);
+
+  // Download audio to buffer
+  const chunks: Buffer[] = [];
+  const stream = ytdl(videoUrl, { format: audioFormat });
+
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stream.on('end', () => resolve());
+    stream.on('error', (err: Error) => reject(err));
+  });
+
+  const audioBuffer = Buffer.concat(chunks);
+  console.log(`Downloaded ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB of audio`);
+
+  // Check file size (Whisper limit is 25MB)
+  if (audioBuffer.length > 25 * 1024 * 1024) {
+    throw new Error('動画が長すぎます。25MB以下の動画を選んでください。');
+  }
+
+  // Create a File object for OpenAI
+  const audioFile = new File([audioBuffer], 'audio.webm', {
+    type: audioFormat.mimeType || 'audio/webm'
+  });
+
+  console.log('Transcribing with Whisper...');
+  const transcription = await openai.audio.transcriptions.create({
+    file: audioFile,
+    model: 'whisper-1',
+    language: 'ja',
+  });
+
+  return transcription.text;
 }
 
 export async function POST(request: NextRequest) {
@@ -35,61 +121,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('Fetching transcript for video:', videoId);
+    console.log('Processing video:', videoId);
 
-    // Try to get Japanese transcript first, then fall back to any available
-    let transcript;
-    let errorMessage = '';
-    try {
-      transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ja' });
-      console.log('Got Japanese transcript');
-    } catch (jaError) {
-      console.log('Japanese transcript not available:', (jaError as Error).message);
-      try {
-        // Try English if Japanese not available
-        transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
-        console.log('Got English transcript');
-      } catch (enError) {
-        console.log('English transcript not available:', (enError as Error).message);
-        // Try any available language
-        try {
-          transcript = await YoutubeTranscript.fetchTranscript(videoId);
-          console.log('Got default transcript');
-        } catch (finalError) {
-          errorMessage = (finalError as Error).message;
-          console.error('All transcript fetch attempts failed:', errorMessage);
-          return NextResponse.json(
-            {
-              error: `この動画の字幕を取得できませんでした。字幕が有効な動画を選んでください。(${errorMessage})`,
-              videoId
-            },
-            { status: 400 }
-          );
-        }
-      }
+    // First, try to get captions (fast and free)
+    const captionText = await tryGetCaptions(videoId);
+
+    if (captionText) {
+      console.log(`Captions fetched: ${captionText.length} characters`);
+      return NextResponse.json({
+        text: captionText,
+        source: 'youtube-captions',
+      });
     }
 
-    if (!transcript || transcript.length === 0) {
+    // No captions available, fall back to audio transcription
+    console.log('No captions, falling back to audio transcription...');
+
+    try {
+      const transcribedText = await transcribeWithWhisper(videoId);
+      console.log(`Whisper transcription: ${transcribedText.length} characters`);
+
+      return NextResponse.json({
+        text: transcribedText,
+        source: 'youtube-whisper',
+      });
+    } catch (whisperError) {
+      console.error('Whisper transcription failed:', whisperError);
       return NextResponse.json(
-        { error: 'この動画には字幕がありません' },
-        { status: 400 }
+        { error: '音声の文字起こしに失敗しました: ' + (whisperError as Error).message },
+        { status: 500 }
       );
     }
-
-    // Combine all transcript segments
-    const fullText = transcript
-      .map((segment: { text: string }) => segment.text)
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    console.log(`Transcript fetched: ${fullText.length} characters`);
-
-    return NextResponse.json({
-      text: fullText,
-      source: 'youtube',
-      segments: transcript.length,
-    });
 
   } catch (error) {
     console.error('YouTube transcription error:', error);
@@ -99,3 +161,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+// Increase timeout for Vercel
+export const maxDuration = 60;

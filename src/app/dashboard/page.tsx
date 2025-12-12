@@ -135,7 +135,7 @@ export default function Home() {
     if (!youtubeUrl) return;
 
     setIsTranscribing(true);
-    setTranscribeStatus('YouTube字幕を取得中...');
+    setTranscribeStatus('YouTube動画を処理中...');
 
     try {
       const res = await fetch('/api/youtube', {
@@ -149,7 +149,8 @@ export default function Home() {
         alert(data.error);
       } else {
         setTranscription(data.text);
-        setTranscribeStatus('YouTube文字起こし完了');
+        const sourceLabel = data.source === 'youtube-captions' ? '字幕から取得完了' : 'Whisper文字起こし完了';
+        setTranscribeStatus(sourceLabel);
       }
     } catch (error) {
       alert('YouTube文字起こしに失敗しました');
@@ -459,9 +460,9 @@ export default function Home() {
                       <div className="p-4 bg-red-50 rounded-xl border border-red-200">
                         <div className="flex items-center gap-2 mb-2">
                           <Youtube className="w-5 h-5 text-red-500" />
-                          <span className="text-sm font-medium text-red-700">YouTube字幕から取得</span>
+                          <span className="text-sm font-medium text-red-700">YouTube動画から文字起こし</span>
                         </div>
-                        <p className="text-xs text-red-600">字幕（自動生成含む）がある動画に対応</p>
+                        <p className="text-xs text-red-600">字幕があれば即取得、なければ音声からWhisperで文字起こし</p>
                       </div>
                       <input
                         type="text"
