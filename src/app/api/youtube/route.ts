@@ -2,10 +2,40 @@ import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
 import ytdl from '@distube/ytdl-core';
 import OpenAI from 'openai';
+import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
+import os from 'os';
+
+const execAsync = promisify(exec);
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
+const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB
+const CHUNK_DURATION = 600; // 10 minutes per chunk
+
+// Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
+function getFFmpegPath(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('ffmpeg-static');
+  } catch {
+    return 'ffmpeg';
+  }
+}
+
+function getFFprobePath(): string {
+  try {
+    // ffprobe is usually in the same directory as ffmpeg
+    const ffmpegPath = getFFmpegPath();
+    return ffmpegPath.replace('ffmpeg', 'ffprobe');
+  } catch {
+    return 'ffprobe';
+  }
+}
 
 function extractVideoId(url: string): string | null {
   const patterns = [
@@ -24,14 +54,12 @@ function extractVideoId(url: string): string | null {
 
 async function tryGetCaptions(videoId: string): Promise<string | null> {
   try {
-    // Try Japanese first
     let transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'ja' });
     if (transcript && transcript.length > 0) {
       console.log('Got Japanese captions');
       return transcript.map((s: { text: string }) => s.text).join(' ').replace(/\s+/g, ' ').trim();
     }
   } catch {
-    // Try English
     try {
       const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
       if (transcript && transcript.length > 0) {
@@ -39,7 +67,6 @@ async function tryGetCaptions(videoId: string): Promise<string | null> {
         return transcript.map((s: { text: string }) => s.text).join(' ').replace(/\s+/g, ' ').trim();
       }
     } catch {
-      // Try any language
       try {
         const transcript = await YoutubeTranscript.fetchTranscript(videoId);
         if (transcript && transcript.length > 0) {
@@ -54,12 +81,63 @@ async function tryGetCaptions(videoId: string): Promise<string | null> {
   return null;
 }
 
-async function transcribeWithWhisper(videoId: string): Promise<string> {
+async function getAudioDuration(filePath: string): Promise<number> {
+  try {
+    const ffprobePath = getFFprobePath();
+    const { stdout } = await execAsync(
+      `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+    );
+    return parseFloat(stdout.trim());
+  } catch (error) {
+    console.error('Failed to get duration:', error);
+    return 0;
+  }
+}
+
+async function splitAudio(inputPath: string, outputDir: string): Promise<string[]> {
+  const duration = await getAudioDuration(inputPath);
+  const chunks: string[] = [];
+
+  if (duration <= 0) {
+    throw new Error('音声ファイルの長さを取得できませんでした');
+  }
+
+  const numChunks = Math.ceil(duration / CHUNK_DURATION);
+  const ffmpegPath = getFFmpegPath();
+
+  console.log(`Video duration: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒, splitting into ${numChunks} chunks`);
+
+  for (let i = 0; i < numChunks; i++) {
+    const startTime = i * CHUNK_DURATION;
+    const chunkPath = path.join(outputDir, `chunk_${i.toString().padStart(3, '0')}.mp3`);
+
+    await execAsync(
+      `"${ffmpegPath}" -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k "${chunkPath}"`
+    );
+
+    chunks.push(chunkPath);
+  }
+
+  return chunks;
+}
+
+async function transcribeChunk(chunkPath: string): Promise<string> {
+  const audioBuffer = await readFile(chunkPath);
+  const file = new File([audioBuffer], path.basename(chunkPath), { type: 'audio/mp3' });
+
+  const transcription = await openai.audio.transcriptions.create({
+    model: 'whisper-1',
+    file: file,
+    language: 'ja',
+  });
+
+  return transcription.text;
+}
+
+async function downloadYouTubeAudio(videoId: string, outputPath: string): Promise<void> {
   console.log('Downloading audio from YouTube...');
 
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-
-  // Get audio stream
   const info = await ytdl.getInfo(videoUrl);
   const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio' });
 
@@ -69,7 +147,6 @@ async function transcribeWithWhisper(videoId: string): Promise<string> {
 
   console.log('Audio format:', audioFormat.mimeType, 'bitrate:', audioFormat.audioBitrate);
 
-  // Download audio to buffer
   const chunks: Buffer[] = [];
   const stream = ytdl(videoUrl, { format: audioFormat });
 
@@ -82,24 +159,64 @@ async function transcribeWithWhisper(videoId: string): Promise<string> {
   const audioBuffer = Buffer.concat(chunks);
   console.log(`Downloaded ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB of audio`);
 
-  // Check file size (Whisper limit is 25MB)
-  if (audioBuffer.length > 25 * 1024 * 1024) {
-    throw new Error('動画が長すぎます。25MB以下の動画を選んでください。');
+  await writeFile(outputPath, audioBuffer);
+}
+
+async function transcribeWithWhisper(videoId: string): Promise<{ text: string; chunks?: number }> {
+  const tempDir = path.join(os.tmpdir(), `youtube_${Date.now()}`);
+  await mkdir(tempDir, { recursive: true });
+
+  const audioPath = path.join(tempDir, 'audio.webm');
+
+  try {
+    await downloadYouTubeAudio(videoId, audioPath);
+
+    // Get file size
+    const audioBuffer = await readFile(audioPath);
+    const fileSize = audioBuffer.length;
+
+    if (fileSize <= MAX_FILE_SIZE) {
+      // Small file - transcribe directly
+      console.log('Small file, transcribing directly...');
+      const file = new File([audioBuffer], 'audio.webm', { type: 'audio/webm' });
+
+      const transcription = await openai.audio.transcriptions.create({
+        file: file,
+        model: 'whisper-1',
+        language: 'ja',
+      });
+
+      return { text: transcription.text };
+    }
+
+    // Large file - split and transcribe
+    console.log(`Large file (${(fileSize / 1024 / 1024).toFixed(2)}MB), splitting...`);
+
+    const chunks = await splitAudio(audioPath, tempDir);
+    console.log(`Split into ${chunks.length} chunks`);
+
+    const transcriptions: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
+      const text = await transcribeChunk(chunks[i]);
+      transcriptions.push(text);
+    }
+
+    const fullText = transcriptions.join('\n\n');
+    return { text: fullText, chunks: chunks.length };
+
+  } finally {
+    // Cleanup temp files
+    try {
+      const files = await readdir(tempDir);
+      for (const file of files) {
+        await unlink(path.join(tempDir, file)).catch(() => {});
+      }
+      await rmdir(tempDir).catch(() => {});
+    } catch {
+      // Ignore cleanup errors
+    }
   }
-
-  // Create a File object for OpenAI
-  const audioFile = new File([audioBuffer], 'audio.webm', {
-    type: audioFormat.mimeType || 'audio/webm'
-  });
-
-  console.log('Transcribing with Whisper...');
-  const transcription = await openai.audio.transcriptions.create({
-    file: audioFile,
-    model: 'whisper-1',
-    language: 'ja',
-  });
-
-  return transcription.text;
 }
 
 export async function POST(request: NextRequest) {
@@ -138,12 +255,13 @@ export async function POST(request: NextRequest) {
     console.log('No captions, falling back to audio transcription...');
 
     try {
-      const transcribedText = await transcribeWithWhisper(videoId);
-      console.log(`Whisper transcription: ${transcribedText.length} characters`);
+      const result = await transcribeWithWhisper(videoId);
+      console.log(`Whisper transcription: ${result.text.length} characters`);
 
       return NextResponse.json({
-        text: transcribedText,
+        text: result.text,
         source: 'youtube-whisper',
+        chunks: result.chunks,
       });
     } catch (whisperError) {
       console.error('Whisper transcription failed:', whisperError);
@@ -162,5 +280,5 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Increase timeout for Vercel
-export const maxDuration = 60;
+// Increase timeout for Vercel (Pro plan allows up to 300s)
+export const maxDuration = 300;

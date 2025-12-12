@@ -15,10 +15,30 @@ const openai = new OpenAI({
 const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB (余裕を持たせる)
 const CHUNK_DURATION = 600; // 10分ごとに分割
 
+// Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
+function getFFmpegPath(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('ffmpeg-static');
+  } catch {
+    return 'ffmpeg';
+  }
+}
+
+function getFFprobePath(): string {
+  try {
+    const ffmpegPath = getFFmpegPath();
+    return ffmpegPath.replace('ffmpeg', 'ffprobe');
+  } catch {
+    return 'ffprobe';
+  }
+}
+
 async function getAudioDuration(filePath: string): Promise<number> {
   try {
+    const ffprobePath = getFFprobePath();
     const { stdout } = await execAsync(
-      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+      `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
     );
     return parseFloat(stdout.trim());
   } catch (error) {
@@ -36,13 +56,14 @@ async function splitAudio(inputPath: string, outputDir: string): Promise<string[
   }
 
   const numChunks = Math.ceil(duration / CHUNK_DURATION);
+  const ffmpegPath = getFFmpegPath();
 
   for (let i = 0; i < numChunks; i++) {
     const startTime = i * CHUNK_DURATION;
     const chunkPath = path.join(outputDir, `chunk_${i.toString().padStart(3, '0')}.mp3`);
 
     await execAsync(
-      `ffmpeg -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k "${chunkPath}"`
+      `"${ffmpegPath}" -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k "${chunkPath}"`
     );
 
     chunks.push(chunkPath);
@@ -146,8 +167,5 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// Increase timeout for Vercel
+export const maxDuration = 300;
