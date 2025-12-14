@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { YoutubeTranscript } from 'youtube-transcript';
-import ytdl from '@distube/ytdl-core';
+import play from 'play-dl';
 import OpenAI from 'openai';
 import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
 import { exec } from 'child_process';
@@ -138,35 +138,59 @@ async function downloadYouTubeAudio(videoId: string, outputPath: string): Promis
   console.log('Downloading audio from YouTube...');
 
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  const info = await ytdl.getInfo(videoUrl);
-  const audioFormat = ytdl.chooseFormat(info.formats, { quality: 'lowestaudio' });
 
-  if (!audioFormat) {
-    throw new Error('No audio format available');
+  try {
+    // Get video info using play-dl
+    const videoInfo = await play.video_info(videoUrl);
+    console.log('Video info retrieved:', videoInfo.video_details.title);
+
+    // Get audio stream
+    const stream = await play.stream(videoUrl, { quality: 140 }); // 140 = m4a audio
+
+    console.log('Stream type:', stream.type);
+
+    const chunks: Buffer[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        stream.stream.destroy();
+        reject(new Error('Download timeout'));
+      }, 180000); // 3 minute timeout
+
+      stream.stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      stream.stream.on('end', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+      stream.stream.on('error', (err: Error) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
+    });
+
+    if (chunks.length === 0) {
+      throw new Error('No data received');
+    }
+
+    const audioBuffer = Buffer.concat(chunks);
+    console.log(`Downloaded ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB of audio`);
+
+    if (audioBuffer.length < 1000) {
+      throw new Error('Downloaded file is too small');
+    }
+
+    await writeFile(outputPath, audioBuffer);
+  } catch (error) {
+    console.error('Download failed:', error);
+    throw new Error('音声のダウンロードに失敗しました: ' + (error as Error).message);
   }
-
-  console.log('Audio format:', audioFormat.mimeType, 'bitrate:', audioFormat.audioBitrate);
-
-  const chunks: Buffer[] = [];
-  const stream = ytdl(videoUrl, { format: audioFormat });
-
-  await new Promise<void>((resolve, reject) => {
-    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    stream.on('end', () => resolve());
-    stream.on('error', (err: Error) => reject(err));
-  });
-
-  const audioBuffer = Buffer.concat(chunks);
-  console.log(`Downloaded ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB of audio`);
-
-  await writeFile(outputPath, audioBuffer);
 }
 
 async function transcribeWithWhisper(videoId: string): Promise<{ text: string; chunks?: number }> {
   const tempDir = path.join(os.tmpdir(), `youtube_${Date.now()}`);
   await mkdir(tempDir, { recursive: true });
 
-  const audioPath = path.join(tempDir, 'audio.webm');
+  const audioPath = path.join(tempDir, 'audio.m4a');
 
   try {
     await downloadYouTubeAudio(videoId, audioPath);
@@ -178,7 +202,7 @@ async function transcribeWithWhisper(videoId: string): Promise<{ text: string; c
     if (fileSize <= MAX_FILE_SIZE) {
       // Small file - transcribe directly
       console.log('Small file, transcribing directly...');
-      const file = new File([audioBuffer], 'audio.webm', { type: 'audio/webm' });
+      const file = new File([audioBuffer], 'audio.m4a', { type: 'audio/mp4' });
 
       const transcription = await openai.audio.transcriptions.create({
         file: file,
