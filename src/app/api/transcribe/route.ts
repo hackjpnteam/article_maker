@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import OpenAI from 'openai';
 import { writeFile, unlink, mkdir, readFile, readdir } from 'fs/promises';
 import { exec } from 'child_process';
@@ -85,7 +87,19 @@ async function transcribeChunk(chunkPath: string): Promise<string> {
   return transcription.text;
 }
 
+// Security: Allowed audio file extensions
+const ALLOWED_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.aac'];
+
 export async function POST(request: NextRequest) {
+  // Security: Require authentication
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json(
+      { error: 'ログインが必要です' },
+      { status: 401 }
+    );
+  }
+
   const tempDir = path.join(os.tmpdir(), `transcribe_${Date.now()}`);
   let inputFilePath = '';
 
@@ -100,13 +114,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Security: Validate file type
+    const ext = path.extname(file.name).toLowerCase() || '.m4a';
+    if (!ALLOWED_EXTENSIONS.includes(ext)) {
+      return NextResponse.json(
+        { error: '対応していないファイル形式です。mp3, m4a, wav, webm, ogg, flac, aacに対応しています。' },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate file size (max 500MB)
+    const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
+    if (file.size > MAX_UPLOAD_SIZE) {
+      return NextResponse.json(
+        { error: 'ファイルサイズが大きすぎます。最大500MBまで対応しています。' },
+        { status: 400 }
+      );
+    }
+
     // 一時ディレクトリ作成
     await mkdir(tempDir, { recursive: true });
 
-    // ファイルを一時保存
+    // ファイルを一時保存 (Security: use sanitized extension)
     const buffer = Buffer.from(await file.arrayBuffer());
-    const ext = path.extname(file.name) || '.m4a';
-    inputFilePath = path.join(tempDir, `input${ext}`);
+    const safeExt = ext.replace(/[^a-z0-9.]/gi, '');
+    inputFilePath = path.join(tempDir, `input${safeExt}`);
     await writeFile(inputFilePath, buffer);
 
     // ファイルサイズチェック

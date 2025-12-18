@@ -3,11 +3,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { Article } from '@/lib/types';
 import {
   Mic,
   FileText,
-  Sparkles,
   Save,
   Download,
   Trash2,
@@ -30,6 +30,7 @@ import {
   User,
   Shield,
   Youtube,
+  ClipboardList,
 } from 'lucide-react';
 
 const STYLES = [
@@ -39,6 +40,7 @@ const STYLES = [
   { id: 'blog', name: 'ブログ', description: 'SEO・具体例重視', icon: BookOpen, color: 'from-purple-500 to-pink-600' },
   { id: 'academic', name: '学術', description: '論理的・体系的', icon: GraduationCap, color: 'from-slate-500 to-gray-600' },
   { id: 'legal', name: '訴状・法律', description: '訴訟用文書作成', icon: Shield, color: 'from-red-500 to-rose-600' },
+  { id: 'minutes', name: '議事録', description: '会議記録・TODO管理', icon: ClipboardList, color: 'from-teal-500 to-cyan-600' },
   { id: 'custom', name: 'カスタム', description: '独自プロンプト', icon: Settings2, color: 'from-gray-500 to-slate-600' },
 ];
 
@@ -57,6 +59,8 @@ export default function Home() {
   const [articleTitle, setArticleTitle] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcribeStatus, setTranscribeStatus] = useState('');
+  const [transcribeProgress, setTranscribeProgress] = useState(0);
+  const [transcribeDetail, setTranscribeDetail] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [articles, setArticles] = useState<Article[]>([]);
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
@@ -136,6 +140,8 @@ export default function Home() {
 
     setIsTranscribing(true);
     setTranscribeStatus('YouTube動画を処理中...');
+    setTranscribeProgress(0);
+    setTranscribeDetail('');
 
     try {
       const res = await fetch('/api/youtube', {
@@ -144,20 +150,62 @@ export default function Home() {
         body: JSON.stringify({ url: youtubeUrl }),
       });
 
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-      } else {
-        setTranscription(data.text);
-        const sourceLabel = data.source === 'youtube-captions' ? '字幕から取得完了' : 'Whisper文字起こし完了';
-        setTranscribeStatus(sourceLabel);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'エラーが発生しました');
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('ストリーミングがサポートされていません');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === 'progress') {
+                setTranscribeProgress(data.progress);
+                setTranscribeStatus(data.message);
+                setTranscribeDetail(data.detail || '');
+              } else if (data.type === 'result') {
+                setTranscription(data.text);
+                const sourceLabel = data.source === 'youtube-captions'
+                  ? '字幕から取得完了'
+                  : `Whisper文字起こし完了${data.chunks ? ` (${data.chunks}パート)` : ''}`;
+                setTranscribeStatus(sourceLabel);
+                setTranscribeProgress(100);
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (parseError) {
+              console.error('Parse error:', parseError);
+            }
+          }
+        }
       }
     } catch (error) {
-      alert('YouTube文字起こしに失敗しました');
+      alert('YouTube文字起こしに失敗しました: ' + (error as Error).message);
       console.error(error);
     } finally {
       setIsTranscribing(false);
-      setTimeout(() => setTranscribeStatus(''), 3000);
+      setTimeout(() => {
+        setTranscribeStatus('');
+        setTranscribeProgress(0);
+        setTranscribeDetail('');
+      }, 3000);
     }
   };
 
@@ -294,9 +342,13 @@ export default function Home() {
           {/* Top Row - Logo and User Menu */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 sm:gap-3">
-              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-                <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-              </div>
+              <Image
+                src="/logo.png"
+                alt="BackNote"
+                width={40}
+                height={40}
+                className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl"
+              />
               <div>
                 <h1 className="text-lg sm:text-xl font-bold text-slate-800">BackNote</h1>
                 <p className="text-xs text-slate-500 hidden sm:block">音声から記事を自動生成</p>
@@ -470,9 +522,33 @@ export default function Home() {
                         value={youtubeUrl}
                         onChange={(e) => setYoutubeUrl(e.target.value)}
                         placeholder="https://www.youtube.com/watch?v=..."
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-300"
+                        disabled={isTranscribing}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-300 disabled:opacity-50"
                       />
                     </div>
+
+                    {/* Progress UI */}
+                    {isTranscribing && (
+                      <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-slate-700">{transcribeStatus}</span>
+                          <span className="text-sm font-bold text-red-600">{transcribeProgress}%</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-red-500 to-red-600 transition-all duration-500 ease-out"
+                            style={{ width: `${transcribeProgress}%` }}
+                          />
+                        </div>
+                        {transcribeDetail && (
+                          <p className="text-xs text-slate-500 mt-2 flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            {transcribeDetail}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     <button
                       onClick={handleYoutubeTranscribe}
                       disabled={!youtubeUrl || isTranscribing}
@@ -481,7 +557,7 @@ export default function Home() {
                       {isTranscribing ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          {transcribeStatus || '処理中...'}
+                          処理中...
                         </>
                       ) : (
                         <>
@@ -772,6 +848,44 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-200 bg-white/80 backdrop-blur-xl mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-4 text-sm text-slate-500">
+              <a
+                href="https://hackjpn.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-700 transition-colors"
+              >
+                運営会社: hackjpn
+              </a>
+              <span className="hidden sm:inline text-slate-300">|</span>
+              <a
+                href="https://hackjpn.com/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-700 transition-colors"
+              >
+                利用規約
+              </a>
+            </div>
+            <div className="text-sm text-slate-400">
+              Powered by{' '}
+              <a
+                href="https://hackjpn.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                hackjpn
+              </a>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

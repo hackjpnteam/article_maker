@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -47,15 +49,89 @@ const STYLE_PROMPTS: Record<string, string> = {
 - 損害額や請求内容の具体的な記載
 - 法的根拠（民法、商法等）への言及
 - 裁判所への提出を想定した形式`,
+
+  minutes: `あなたはプロフェッショナルな会議議事録作成の専門家です。以下のフォーマットと特徴で正式な議事録を作成してください：
+
+【議事録フォーマット】
+# 会議議事録
+
+## 会議概要
+- **会議名**: （会議の名称を推測して記載）
+- **日時**: （言及があれば記載、なければ「記載なし」）
+- **場所**: （言及があれば記載、なければ「記載なし」）
+- **出席者**: （発言者から推測して記載）
+- **議事録作成者**: BackNote AI
+
+## 議題
+1. （主要な議題を箇条書きで列挙）
+
+## 議事内容
+### 議題1: （議題名）
+- **発言者**: （発言内容の要約）
+- **議論のポイント**:
+- **結論/合意事項**:
+
+### 議題2: （議題名）
+...
+
+## 決定事項
+| No. | 決定内容 | 担当者 | 期限 |
+|-----|----------|--------|------|
+| 1   |          |        |      |
+
+## アクションアイテム（TODO）
+| No. | タスク内容 | 担当者 | 期限 | 優先度 |
+|-----|------------|--------|------|--------|
+| 1   |            |        |      |        |
+
+## 次回会議
+- **予定日時**: （言及があれば記載）
+- **議題（予定）**:
+
+## 備考
+（その他特記事項）
+
+---
+
+【作成上の注意】
+- 発言は要約し、重要なポイントを漏れなく記載
+- 決定事項とアクションアイテムは明確に区別
+- 曖昧な表現を避け、具体的に記載
+- 担当者が不明な場合は「要確認」と記載
+- 数字や固有名詞は正確に記載`,
 };
 
 export async function POST(request: NextRequest) {
+  // Security: Require authentication
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
+    return NextResponse.json(
+      { error: 'ログインが必要です' },
+      { status: 401 }
+    );
+  }
+
   try {
     const { text, style, targetLength, customPrompt } = await request.json();
 
-    if (!text) {
+    if (!text || typeof text !== 'string') {
       return NextResponse.json(
         { error: '文字起こしテキストが必要です' },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate input lengths
+    if (text.length > 500000) {
+      return NextResponse.json(
+        { error: 'テキストが長すぎます（最大50万文字）' },
+        { status: 400 }
+      );
+    }
+
+    if (customPrompt && customPrompt.length > 5000) {
+      return NextResponse.json(
+        { error: 'カスタムプロンプトが長すぎます（最大5000文字）' },
         { status: 400 }
       );
     }

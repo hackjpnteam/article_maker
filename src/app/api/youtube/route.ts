@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { YoutubeTranscript } from 'youtube-transcript';
-import play from 'play-dl';
 import OpenAI from 'openai';
-import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
+import { unlink, mkdir, readFile, readdir, rmdir, stat } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -16,6 +17,34 @@ const openai = new OpenAI({
 
 const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB
 const CHUNK_DURATION = 600; // 10 minutes per chunk
+
+type ProgressData = {
+  type: 'progress';
+  step: string;
+  progress: number;
+  message: string;
+  detail?: string;
+};
+
+type ResultData = {
+  type: 'result';
+  text: string;
+  source: string;
+  chunks?: number;
+};
+
+type ErrorData = {
+  type: 'error';
+  error: string;
+};
+
+type SSEData = ProgressData | ResultData | ErrorData;
+
+// Helper to send SSE events
+function sendSSE(controller: ReadableStreamDefaultController, data: SSEData) {
+  const encoder = new TextEncoder();
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+}
 
 // Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
 function getFFmpegPath(): string {
@@ -37,6 +66,7 @@ function getFFprobePath(): string {
   }
 }
 
+// Security: Strict validation of YouTube video ID to prevent command injection
 function extractVideoId(url: string): string | null {
   const patterns = [
     /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/,
@@ -46,10 +76,20 @@ function extractVideoId(url: string): string | null {
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) {
-      return match[1];
+      const videoId = match[1];
+      // Security: Double-check that videoId only contains safe characters
+      if (/^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+        return videoId;
+      }
     }
   }
   return null;
+}
+
+// Security: Sanitize string for shell command (escape special characters)
+function sanitizeForShell(str: string): string {
+  // Only allow alphanumeric, dash, underscore
+  return str.replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
 async function tryGetCaptions(videoId: string): Promise<string | null> {
@@ -135,51 +175,27 @@ async function transcribeChunk(chunkPath: string): Promise<string> {
 }
 
 async function downloadYouTubeAudio(videoId: string, outputPath: string): Promise<void> {
-  console.log('Downloading audio from YouTube...');
+  console.log('Downloading audio from YouTube using yt-dlp...');
 
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
   try {
-    // Get video info using play-dl
-    const videoInfo = await play.video_info(videoUrl);
-    console.log('Video info retrieved:', videoInfo.video_details.title);
+    // Use yt-dlp to download audio (much more reliable than ytdl-core)
+    const command = `yt-dlp -x --audio-format m4a --audio-quality 0 -o "${outputPath}" "${videoUrl}"`;
 
-    // Get audio stream
-    const stream = await play.stream(videoUrl, { quality: 140 }); // 140 = m4a audio
+    console.log('Running yt-dlp...');
+    const { stdout, stderr } = await execAsync(command, { timeout: 180000 });
 
-    console.log('Stream type:', stream.type);
+    if (stdout) console.log('yt-dlp output:', stdout);
+    if (stderr) console.log('yt-dlp stderr:', stderr);
 
-    const chunks: Buffer[] = [];
+    // Verify file exists and has content
+    const fileStats = await stat(outputPath);
+    console.log(`Downloaded ${(fileStats.size / 1024 / 1024).toFixed(2)}MB of audio`);
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        stream.stream.destroy();
-        reject(new Error('Download timeout'));
-      }, 180000); // 3 minute timeout
-
-      stream.stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-      stream.stream.on('end', () => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      stream.stream.on('error', (err: Error) => {
-        clearTimeout(timeout);
-        reject(err);
-      });
-    });
-
-    if (chunks.length === 0) {
-      throw new Error('No data received');
-    }
-
-    const audioBuffer = Buffer.concat(chunks);
-    console.log(`Downloaded ${(audioBuffer.length / 1024 / 1024).toFixed(2)}MB of audio`);
-
-    if (audioBuffer.length < 1000) {
+    if (fileStats.size < 1000) {
       throw new Error('Downloaded file is too small');
     }
-
-    await writeFile(outputPath, audioBuffer);
   } catch (error) {
     console.error('Download failed:', error);
     throw new Error('音声のダウンロードに失敗しました: ' + (error as Error).message);
@@ -244,63 +260,279 @@ async function transcribeWithWhisper(videoId: string): Promise<{ text: string; c
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const { url } = await request.json();
-
-    if (!url) {
-      return NextResponse.json(
-        { error: 'YouTube URLが必要です' },
-        { status: 400 }
-      );
-    }
-
-    const videoId = extractVideoId(url);
-    if (!videoId) {
-      return NextResponse.json(
-        { error: '有効なYouTube URLを入力してください' },
-        { status: 400 }
-      );
-    }
-
-    console.log('Processing video:', videoId);
-
-    // First, try to get captions (fast and free)
-    const captionText = await tryGetCaptions(videoId);
-
-    if (captionText) {
-      console.log(`Captions fetched: ${captionText.length} characters`);
-      return NextResponse.json({
-        text: captionText,
-        source: 'youtube-captions',
-      });
-    }
-
-    // No captions available, fall back to audio transcription
-    console.log('No captions, falling back to audio transcription...');
-
-    try {
-      const result = await transcribeWithWhisper(videoId);
-      console.log(`Whisper transcription: ${result.text.length} characters`);
-
-      return NextResponse.json({
-        text: result.text,
-        source: 'youtube-whisper',
-        chunks: result.chunks,
-      });
-    } catch (whisperError) {
-      console.error('Whisper transcription failed:', whisperError);
-      return NextResponse.json(
-        { error: '音声の文字起こしに失敗しました: ' + (whisperError as Error).message },
-        { status: 500 }
-      );
-    }
-
-  } catch (error) {
-    console.error('YouTube transcription error:', error);
+  // Security: Require authentication
+  const session = await getServerSession(authOptions);
+  if (!session?.user) {
     return NextResponse.json(
-      { error: 'YouTube文字起こしに失敗しました: ' + (error as Error).message },
-      { status: 500 }
+      { error: 'ログインが必要です' },
+      { status: 401 }
     );
+  }
+
+  let requestBody: { url?: string };
+
+  try {
+    requestBody = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: 'Invalid request body' },
+      { status: 400 }
+    );
+  }
+
+  const { url } = requestBody;
+
+  if (!url || typeof url !== 'string' || url.length > 200) {
+    return NextResponse.json(
+      { error: 'YouTube URLが必要です' },
+      { status: 400 }
+    );
+  }
+
+  const videoId = extractVideoId(url);
+  if (!videoId) {
+    return NextResponse.json(
+      { error: '有効なYouTube URLを入力してください' },
+      { status: 400 }
+    );
+  }
+
+  // Security: Sanitize videoId before using in shell commands
+  const safeVideoId = sanitizeForShell(videoId);
+
+  // Create a streaming response
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        console.log('Processing video:', safeVideoId);
+
+        // Step 1: Check for captions
+        sendSSE(controller, {
+          type: 'progress',
+          step: 'captions',
+          progress: 5,
+          message: '字幕を確認中...',
+          detail: 'YouTubeの字幕データを取得しています',
+        });
+
+        const captionText = await tryGetCaptions(safeVideoId);
+
+        if (captionText) {
+          console.log(`Captions fetched: ${captionText.length} characters`);
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'complete',
+            progress: 100,
+            message: '完了!',
+            detail: '字幕から文字起こしを取得しました',
+          });
+          sendSSE(controller, {
+            type: 'result',
+            text: captionText,
+            source: 'youtube-captions',
+          });
+          controller.close();
+          return;
+        }
+
+        // Step 2: No captions, start audio download
+        sendSSE(controller, {
+          type: 'progress',
+          step: 'download',
+          progress: 10,
+          message: '音声をダウンロード中...',
+          detail: '字幕が見つからないため、音声を取得しています',
+        });
+
+        console.log('No captions, falling back to audio transcription...');
+
+        const tempDir = path.join(os.tmpdir(), `youtube_${Date.now()}`);
+        await mkdir(tempDir, { recursive: true });
+        const audioPath = path.join(tempDir, 'audio.m4a');
+
+        try {
+          // Download audio with progress updates
+          await downloadYouTubeAudioWithProgress(safeVideoId, audioPath, controller);
+
+          // Step 3: Prepare for transcription
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'prepare',
+            progress: 50,
+            message: '文字起こしの準備中...',
+            detail: '音声ファイルを処理しています',
+          });
+
+          const audioBuffer = await readFile(audioPath);
+          const fileSize = audioBuffer.length;
+
+          if (fileSize <= MAX_FILE_SIZE) {
+            // Small file - transcribe directly
+            sendSSE(controller, {
+              type: 'progress',
+              step: 'transcribe',
+              progress: 60,
+              message: '文字起こし中...',
+              detail: 'AIが音声を解析しています (これには数分かかる場合があります)',
+            });
+
+            const file = new File([audioBuffer], 'audio.m4a', { type: 'audio/mp4' });
+            const transcription = await openai.audio.transcriptions.create({
+              file: file,
+              model: 'whisper-1',
+              language: 'ja',
+            });
+
+            sendSSE(controller, {
+              type: 'progress',
+              step: 'complete',
+              progress: 100,
+              message: '完了!',
+              detail: '文字起こしが完了しました',
+            });
+
+            sendSSE(controller, {
+              type: 'result',
+              text: transcription.text,
+              source: 'youtube-whisper',
+            });
+          } else {
+            // Large file - split and transcribe with progress
+            sendSSE(controller, {
+              type: 'progress',
+              step: 'split',
+              progress: 55,
+              message: '音声を分割中...',
+              detail: `大きなファイル (${(fileSize / 1024 / 1024).toFixed(1)}MB) のため分割処理しています`,
+            });
+
+            const chunks = await splitAudio(audioPath, tempDir);
+            const transcriptions: string[] = [];
+
+            for (let i = 0; i < chunks.length; i++) {
+              const chunkProgress = 60 + Math.floor((i / chunks.length) * 35);
+              sendSSE(controller, {
+                type: 'progress',
+                step: 'transcribe',
+                progress: chunkProgress,
+                message: `文字起こし中... (${i + 1}/${chunks.length})`,
+                detail: `パート ${i + 1} を処理しています`,
+              });
+
+              const text = await transcribeChunk(chunks[i]);
+              transcriptions.push(text);
+            }
+
+            const fullText = transcriptions.join('\n\n');
+
+            sendSSE(controller, {
+              type: 'progress',
+              step: 'complete',
+              progress: 100,
+              message: '完了!',
+              detail: `${chunks.length}パートの文字起こしが完了しました`,
+            });
+
+            sendSSE(controller, {
+              type: 'result',
+              text: fullText,
+              source: 'youtube-whisper',
+              chunks: chunks.length,
+            });
+          }
+
+          // Cleanup
+          try {
+            const files = await readdir(tempDir);
+            for (const file of files) {
+              await unlink(path.join(tempDir, file)).catch(() => {});
+            }
+            await rmdir(tempDir).catch(() => {});
+          } catch {
+            // Ignore cleanup errors
+          }
+
+        } catch (whisperError) {
+          console.error('Whisper transcription failed:', whisperError);
+          sendSSE(controller, {
+            type: 'error',
+            error: '音声の文字起こしに失敗しました: ' + (whisperError as Error).message,
+          });
+        }
+
+        controller.close();
+
+      } catch (error) {
+        console.error('YouTube transcription error:', error);
+        sendSSE(controller, {
+          type: 'error',
+          error: 'YouTube文字起こしに失敗しました: ' + (error as Error).message,
+        });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
+// Download with progress updates
+async function downloadYouTubeAudioWithProgress(
+  videoId: string,
+  outputPath: string,
+  controller: ReadableStreamDefaultController
+): Promise<void> {
+  console.log('Downloading audio from YouTube using yt-dlp...');
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+
+  sendSSE(controller, {
+    type: 'progress',
+    step: 'download',
+    progress: 15,
+    message: '音声をダウンロード中...',
+    detail: 'YouTubeから音声を取得しています',
+  });
+
+  try {
+    const command = `yt-dlp -x --audio-format m4a --audio-quality 0 -o "${outputPath}" "${videoUrl}"`;
+    console.log('Running yt-dlp...');
+
+    sendSSE(controller, {
+      type: 'progress',
+      step: 'download',
+      progress: 25,
+      message: '音声をダウンロード中...',
+      detail: 'ダウンロード処理中です...',
+    });
+
+    const { stdout, stderr } = await execAsync(command, { timeout: 180000 });
+
+    if (stdout) console.log('yt-dlp output:', stdout);
+    if (stderr) console.log('yt-dlp stderr:', stderr);
+
+    const fileStats = await stat(outputPath);
+    console.log(`Downloaded ${(fileStats.size / 1024 / 1024).toFixed(2)}MB of audio`);
+
+    sendSSE(controller, {
+      type: 'progress',
+      step: 'download',
+      progress: 45,
+      message: 'ダウンロード完了!',
+      detail: `${(fileStats.size / 1024 / 1024).toFixed(1)}MB の音声を取得しました`,
+    });
+
+    if (fileStats.size < 1000) {
+      throw new Error('Downloaded file is too small');
+    }
+  } catch (error) {
+    console.error('Download failed:', error);
+    throw new Error('音声のダウンロードに失敗しました: ' + (error as Error).message);
   }
 }
 

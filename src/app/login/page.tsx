@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Mail, Lock, User, Loader2, LogIn, UserPlus } from 'lucide-react';
+import Image from 'next/image';
+import { Mail, Lock, User, Loader2, LogIn, UserPlus } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -72,9 +73,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-xl shadow-violet-500/25 mb-4">
-            <Sparkles className="w-8 h-8 text-white" />
-          </div>
+          <Image
+            src="/logo.png"
+            alt="BackNote"
+            width={64}
+            height={64}
+            className="mx-auto rounded-2xl mb-4"
+          />
           <h1 className="text-2xl font-bold text-slate-800">BackNote</h1>
           <p className="text-slate-500 mt-1">音声からプロ品質の記事を自動生成</p>
         </div>

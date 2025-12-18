@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useSession } from 'next-auth/react';
 import {
-  Sparkles,
   Mic,
   FileText,
   Zap,
@@ -18,6 +18,7 @@ import {
   Play,
   Scale,
   Youtube,
+  ClipboardList,
 } from 'lucide-react';
 
 const features = [
@@ -50,6 +51,7 @@ const styles = [
   { name: 'ブログ', icon: BookOpen, color: 'from-purple-500 to-pink-600', desc: 'SEO重視' },
   { name: '学術', icon: GraduationCap, color: 'from-slate-500 to-gray-600', desc: '論理的' },
   { name: '訴状・法律', icon: Scale, color: 'from-red-500 to-rose-600', desc: '訴訟用' },
+  { name: '議事録', icon: ClipboardList, color: 'from-teal-500 to-cyan-600', desc: '会議記録' },
 ];
 
 const steps = [
@@ -68,9 +70,13 @@ export default function LandingPage() {
       <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex items-center justify-between">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-            </div>
+            <Image
+              src="/logo.png"
+              alt="BackNote"
+              width={40}
+              height={40}
+              className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl"
+            />
             <span className="text-lg sm:text-xl font-bold text-slate-800">BackNote</span>
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
@@ -280,15 +286,53 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="py-12 px-6 border-t border-slate-200">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-white" />
+      <footer className="py-12 px-6 border-t border-slate-200 bg-white/80">
+        <div className="max-w-6xl mx-auto">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <Image
+                src="/logo.png"
+                alt="BackNote"
+                width={32}
+                height={32}
+                className="w-8 h-8 rounded-lg"
+              />
+              <span className="font-bold text-slate-800">BackNote</span>
             </div>
-            <span className="font-bold text-slate-800">BackNote</span>
+            <div className="flex items-center gap-4 text-sm text-slate-500">
+              <a
+                href="https://hackjpn.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-700 transition-colors"
+              >
+                運営会社: hackjpn
+              </a>
+              <span className="text-slate-300">|</span>
+              <a
+                href="https://hackjpn.com/terms"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-slate-700 transition-colors"
+              >
+                利用規約
+              </a>
+            </div>
           </div>
-          <p className="text-slate-500 text-sm">© 2024 BackNote. All rights reserved.</p>
+          <div className="mt-6 pt-6 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-slate-400 text-sm">© 2024 BackNote. All rights reserved.</p>
+            <p className="text-sm text-slate-400">
+              Powered by{' '}
+              <a
+                href="https://hackjpn.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                hackjpn
+              </a>
+            </p>
+          </div>
         </div>
       </footer>
     </div>
