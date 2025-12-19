@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import OpenAI from 'openai';
-import { writeFile, unlink, mkdir, readFile, readdir } from 'fs/promises';
+import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -16,6 +16,34 @@ const openai = new OpenAI({
 
 const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB (余裕を持たせる)
 const CHUNK_DURATION = 600; // 10分ごとに分割
+
+type ProgressData = {
+  type: 'progress';
+  step: string;
+  progress: number;
+  message: string;
+  detail?: string;
+};
+
+type ResultData = {
+  type: 'result';
+  text: string;
+  chunks?: number;
+  duration?: number;
+};
+
+type ErrorData = {
+  type: 'error';
+  error: string;
+};
+
+type SSEData = ProgressData | ResultData | ErrorData;
+
+// Helper to send SSE events
+function sendSSE(controller: ReadableStreamDefaultController, data: SSEData) {
+  const encoder = new TextEncoder();
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+}
 
 // Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
 function getFFmpegPath(): string {
@@ -49,7 +77,11 @@ async function getAudioDuration(filePath: string): Promise<number> {
   }
 }
 
-async function splitAudio(inputPath: string, outputDir: string): Promise<string[]> {
+async function splitAudio(
+  inputPath: string,
+  outputDir: string,
+  controller: ReadableStreamDefaultController
+): Promise<string[]> {
   const duration = await getAudioDuration(inputPath);
   const chunks: string[] = [];
 
@@ -60,9 +92,19 @@ async function splitAudio(inputPath: string, outputDir: string): Promise<string[
   const numChunks = Math.ceil(duration / CHUNK_DURATION);
   const ffmpegPath = getFFmpegPath();
 
+  console.log(`Audio duration: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒, splitting into ${numChunks} chunks`);
+
   for (let i = 0; i < numChunks; i++) {
     const startTime = i * CHUNK_DURATION;
     const chunkPath = path.join(outputDir, `chunk_${i.toString().padStart(3, '0')}.mp3`);
+
+    sendSSE(controller, {
+      type: 'progress',
+      step: 'split',
+      progress: 30 + Math.floor((i / numChunks) * 20),
+      message: `音声を分割中... (${i + 1}/${numChunks})`,
+      detail: `パート ${i + 1} を準備しています`,
+    });
 
     await execAsync(
       `"${ffmpegPath}" -y -i "${inputPath}" -ss ${startTime} -t ${CHUNK_DURATION} -acodec libmp3lame -ar 16000 -ac 1 -b:a 64k "${chunkPath}"`
@@ -100,103 +142,209 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const tempDir = path.join(os.tmpdir(), `transcribe_${Date.now()}`);
-  let inputFilePath = '';
-
+  let formData: FormData;
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-
-    if (!file) {
-      return NextResponse.json(
-        { error: 'ファイルが必要です' },
-        { status: 400 }
-      );
-    }
-
-    // Security: Validate file type
-    const ext = path.extname(file.name).toLowerCase() || '.m4a';
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return NextResponse.json(
-        { error: '対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。' },
-        { status: 400 }
-      );
-    }
-
-    // Security: Validate file size (max 500MB)
-    const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
-    if (file.size > MAX_UPLOAD_SIZE) {
-      return NextResponse.json(
-        { error: 'ファイルサイズが大きすぎます。最大500MBまで対応しています。' },
-        { status: 400 }
-      );
-    }
-
-    // 一時ディレクトリ作成
-    await mkdir(tempDir, { recursive: true });
-
-    // ファイルを一時保存 (Security: use sanitized extension)
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const safeExt = ext.replace(/[^a-z0-9.]/gi, '');
-    inputFilePath = path.join(tempDir, `input${safeExt}`);
-    await writeFile(inputFilePath, buffer);
-
-    // ファイルサイズチェック
-    if (file.size <= MAX_FILE_SIZE) {
-      // 小さいファイルは直接処理
-      const transcription = await openai.audio.transcriptions.create({
-        model: 'whisper-1',
-        file: file,
-        language: 'ja',
-      });
-
-      return NextResponse.json({ text: transcription.text });
-    }
-
-    // 大きいファイルは分割して処理
-    console.log(`Large file detected (${(file.size / 1024 / 1024).toFixed(2)}MB), splitting...`);
-
-    const duration = await getAudioDuration(inputFilePath);
-    console.log(`Audio duration: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒`);
-
-    const chunks = await splitAudio(inputFilePath, tempDir);
-    console.log(`Split into ${chunks.length} chunks`);
-
-    // 各チャンクを文字起こし
-    const transcriptions: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
-      const text = await transcribeChunk(chunks[i]);
-      transcriptions.push(text);
-    }
-
-    // 結果を結合
-    const fullText = transcriptions.join('\n\n');
-
-    return NextResponse.json({
-      text: fullText,
-      chunks: chunks.length,
-      duration: Math.floor(duration / 60)
-    });
-
-  } catch (error) {
-    console.error('Transcription error:', error);
+    formData = await request.formData();
+  } catch {
     return NextResponse.json(
-      { error: '文字起こしに失敗しました: ' + (error as Error).message },
-      { status: 500 }
+      { error: 'ファイルが必要です' },
+      { status: 400 }
     );
-  } finally {
-    // 一時ファイルをクリーンアップ
-    try {
-      const files = await readdir(tempDir);
-      for (const file of files) {
-        await unlink(path.join(tempDir, file));
-      }
-      await unlink(tempDir).catch(() => {});
-    } catch (e) {
-      // クリーンアップエラーは無視
-    }
   }
+
+  const file = formData.get('file') as File;
+
+  if (!file) {
+    return NextResponse.json(
+      { error: 'ファイルが必要です' },
+      { status: 400 }
+    );
+  }
+
+  // Security: Validate file type
+  const ext = path.extname(file.name).toLowerCase() || '.m4a';
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    return NextResponse.json(
+      { error: '対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。' },
+      { status: 400 }
+    );
+  }
+
+  // Security: Validate file size (max 500MB)
+  const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
+  if (file.size > MAX_UPLOAD_SIZE) {
+    return NextResponse.json(
+      { error: 'ファイルサイズが大きすぎます。最大500MBまで対応しています。' },
+      { status: 400 }
+    );
+  }
+
+  // Store file data before streaming starts
+  const fileBuffer = Buffer.from(await file.arrayBuffer());
+  const fileName = file.name;
+  const fileSize = file.size;
+
+  // Create a streaming response
+  const stream = new ReadableStream({
+    async start(controller) {
+      const tempDir = path.join(os.tmpdir(), `transcribe_${Date.now()}`);
+      let inputFilePath = '';
+
+      try {
+        // Step 1: Uploading
+        sendSSE(controller, {
+          type: 'progress',
+          step: 'upload',
+          progress: 10,
+          message: 'ファイルを処理中...',
+          detail: `${fileName} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`,
+        });
+
+        // 一時ディレクトリ作成
+        await mkdir(tempDir, { recursive: true });
+
+        // ファイルを一時保存 (Security: use sanitized extension)
+        const safeExt = ext.replace(/[^a-z0-9.]/gi, '');
+        inputFilePath = path.join(tempDir, `input${safeExt}`);
+        await writeFile(inputFilePath, fileBuffer);
+
+        sendSSE(controller, {
+          type: 'progress',
+          step: 'prepare',
+          progress: 20,
+          message: '文字起こしの準備中...',
+          detail: '音声ファイルを解析しています',
+        });
+
+        // ファイルサイズチェック
+        if (fileSize <= MAX_FILE_SIZE) {
+          // 小さいファイルは直接処理
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'transcribe',
+            progress: 40,
+            message: '文字起こし中...',
+            detail: 'AIが音声を解析しています (これには数分かかる場合があります)',
+          });
+
+          const audioFile = new File([fileBuffer], fileName, { type: `audio/${ext.slice(1)}` });
+          const transcription = await openai.audio.transcriptions.create({
+            model: 'whisper-1',
+            file: audioFile,
+            language: 'ja',
+          });
+
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'complete',
+            progress: 100,
+            message: '完了!',
+            detail: '文字起こしが完了しました',
+          });
+
+          sendSSE(controller, {
+            type: 'result',
+            text: transcription.text,
+          });
+
+        } else {
+          // 大きいファイルは分割して処理
+          console.log(`Large file detected (${(fileSize / 1024 / 1024).toFixed(2)}MB), splitting...`);
+
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'analyze',
+            progress: 25,
+            message: '音声を解析中...',
+            detail: `大きなファイル (${(fileSize / 1024 / 1024).toFixed(1)}MB) のため分割処理します`,
+          });
+
+          const duration = await getAudioDuration(inputFilePath);
+          const durationMinutes = Math.floor(duration / 60);
+          console.log(`Audio duration: ${durationMinutes}分${Math.floor(duration % 60)}秒`);
+
+          const chunks = await splitAudio(inputFilePath, tempDir, controller);
+          console.log(`Split into ${chunks.length} chunks`);
+
+          // 各チャンクを文字起こし
+          const transcriptions: string[] = [];
+          for (let i = 0; i < chunks.length; i++) {
+            const chunkProgress = 50 + Math.floor((i / chunks.length) * 45);
+            sendSSE(controller, {
+              type: 'progress',
+              step: 'transcribe',
+              progress: chunkProgress,
+              message: `文字起こし中... (${i + 1}/${chunks.length})`,
+              detail: `パート ${i + 1} を処理しています`,
+            });
+
+            console.log(`Processing chunk ${i + 1}/${chunks.length}...`);
+            const text = await transcribeChunk(chunks[i]);
+            transcriptions.push(text);
+          }
+
+          // 結果を結合
+          const fullText = transcriptions.join('\n\n');
+
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'complete',
+            progress: 100,
+            message: '完了!',
+            detail: `${chunks.length}パートの文字起こしが完了しました`,
+          });
+
+          sendSSE(controller, {
+            type: 'result',
+            text: fullText,
+            chunks: chunks.length,
+            duration: durationMinutes,
+          });
+        }
+
+        // Cleanup
+        try {
+          const files = await readdir(tempDir);
+          for (const f of files) {
+            await unlink(path.join(tempDir, f)).catch(() => {});
+          }
+          await rmdir(tempDir).catch(() => {});
+        } catch {
+          // Ignore cleanup errors
+        }
+
+        controller.close();
+
+      } catch (error) {
+        console.error('Transcription error:', error);
+        sendSSE(controller, {
+          type: 'error',
+          error: '文字起こしに失敗しました: ' + (error as Error).message,
+        });
+
+        // Cleanup on error
+        try {
+          const files = await readdir(tempDir);
+          for (const f of files) {
+            await unlink(path.join(tempDir, f)).catch(() => {});
+          }
+          await rmdir(tempDir).catch(() => {});
+        } catch {
+          // Ignore cleanup errors
+        }
+
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
 }
 
 // Increase timeout for Vercel

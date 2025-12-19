@@ -100,13 +100,9 @@ export default function Home() {
     if (!file) return;
 
     setIsTranscribing(true);
-    const fileSizeMB = file.size / 1024 / 1024;
-
-    if (fileSizeMB > 24) {
-      setTranscribeStatus(`大きなファイル (${fileSizeMB.toFixed(1)}MB) を分割処理中...`);
-    } else {
-      setTranscribeStatus('文字起こし中...');
-    }
+    setTranscribeStatus('ファイルをアップロード中...');
+    setTranscribeProgress(0);
+    setTranscribeDetail('');
 
     try {
       const formData = new FormData();
@@ -117,21 +113,62 @@ export default function Home() {
         body: formData,
       });
 
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-      } else {
-        setTranscription(data.text);
-        if (data.chunks && data.chunks > 1) {
-          setTranscribeStatus(`${data.duration}分の音声を${data.chunks}分割で処理完了`);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'エラーが発生しました');
+      }
+
+      const reader = res.body?.getReader();
+      if (!reader) {
+        throw new Error('ストリーミングがサポートされていません');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+
+              if (data.type === 'progress') {
+                setTranscribeProgress(data.progress);
+                setTranscribeStatus(data.message);
+                setTranscribeDetail(data.detail || '');
+              } else if (data.type === 'result') {
+                setTranscription(data.text);
+                const statusText = data.chunks
+                  ? `${data.duration}分の音声を${data.chunks}パートで処理完了`
+                  : '文字起こし完了';
+                setTranscribeStatus(statusText);
+                setTranscribeProgress(100);
+              } else if (data.type === 'error') {
+                throw new Error(data.error);
+              }
+            } catch (parseError) {
+              console.error('Parse error:', parseError);
+            }
+          }
         }
       }
     } catch (error) {
-      alert('文字起こしに失敗しました');
+      alert('文字起こしに失敗しました: ' + (error as Error).message);
       console.error(error);
     } finally {
       setIsTranscribing(false);
-      setTimeout(() => setTranscribeStatus(''), 3000);
+      setTimeout(() => {
+        setTranscribeStatus('');
+        setTranscribeProgress(0);
+        setTranscribeDetail('');
+      }, 3000);
     }
   };
 
@@ -450,11 +487,13 @@ export default function Home() {
                 {inputType === 'audio' && (
                   <div>
                     <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className={`relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${
-                        file
-                          ? 'border-violet-400 bg-violet-50'
-                          : 'border-slate-300 hover:border-violet-400 hover:bg-slate-50'
+                      onClick={() => !isTranscribing && fileInputRef.current?.click()}
+                      className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
+                        isTranscribing
+                          ? 'border-emerald-400 bg-emerald-50 cursor-not-allowed'
+                          : file
+                          ? 'border-violet-400 bg-violet-50 cursor-pointer'
+                          : 'border-slate-300 hover:border-violet-400 hover:bg-slate-50 cursor-pointer'
                       }`}
                     >
                       <input
@@ -463,6 +502,7 @@ export default function Home() {
                         accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.flac,.webm,.caf,video/*"
                         onChange={handleFileChange}
                         className="hidden"
+                        disabled={isTranscribing}
                       />
                       {file ? (
                         <div className="space-y-2">
@@ -484,6 +524,29 @@ export default function Home() {
                         </div>
                       )}
                     </div>
+
+                    {/* Progress UI for Audio */}
+                    {isTranscribing && (
+                      <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-slate-700">{transcribeStatus}</span>
+                          <span className="text-sm font-bold text-emerald-600">{transcribeProgress}%</span>
+                        </div>
+                        <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-500 to-green-600 transition-all duration-500 ease-out"
+                            style={{ width: `${transcribeProgress}%` }}
+                          />
+                        </div>
+                        {transcribeDetail && (
+                          <p className="text-xs text-slate-500 mt-2 flex items-center gap-2">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            {transcribeDetail}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     <button
                       onClick={handleTranscribe}
                       disabled={!file || isTranscribing}
@@ -492,7 +555,7 @@ export default function Home() {
                       {isTranscribing ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          {transcribeStatus || '文字起こし中...'}
+                          処理中...
                         </>
                       ) : (
                         <>
