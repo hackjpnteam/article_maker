@@ -59,8 +59,8 @@ function getFFmpegPath(): string {
 
 function getFFprobePath(): string {
   try {
-    const ffmpegPath = getFFmpegPath();
-    return ffmpegPath.replace('ffmpeg', 'ffprobe');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('ffprobe-static').path;
   } catch {
     return 'ffprobe';
   }
