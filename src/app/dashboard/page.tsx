@@ -105,20 +105,59 @@ export default function Home() {
     setTranscribeDetail('');
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
+      const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4MB - Vercel's limit
+      let transcribeRes: Response;
 
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: formData,
-      });
+      if (file.size > DIRECT_UPLOAD_LIMIT) {
+        // Large file: Upload to Vercel Blob first
+        setTranscribeStatus('大きいファイルをアップロード中...');
+        setTranscribeDetail(`${(file.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
+        setTranscribeProgress(5);
 
-      if (!res.ok) {
-        const errorData = await res.json();
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          const errorData = await uploadRes.json();
+          throw new Error(errorData.error || 'アップロードに失敗しました');
+        }
+
+        const uploadData = await uploadRes.json();
+        setTranscribeProgress(10);
+        setTranscribeStatus('文字起こしを開始...');
+
+        // Now call transcribe with blob URL
+        transcribeRes = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            blobUrl: uploadData.url,
+            name: uploadData.name,
+            size: uploadData.size,
+          }),
+        });
+      } else {
+        // Small file: Direct upload
+        const formData = new FormData();
+        formData.append('file', file);
+
+        transcribeRes = await fetch('/api/transcribe', {
+          method: 'POST',
+          body: formData,
+        });
+      }
+
+      if (!transcribeRes.ok) {
+        const errorData = await transcribeRes.json();
         throw new Error(errorData.error || 'エラーが発生しました');
       }
 
-      const reader = res.body?.getReader();
+      const reader = transcribeRes.body?.getReader();
       if (!reader) {
         throw new Error('ストリーミングがサポートされていません');
       }

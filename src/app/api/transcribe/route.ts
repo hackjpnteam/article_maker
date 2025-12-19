@@ -142,27 +142,77 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch {
-    return NextResponse.json(
-      { error: 'ファイルが必要です' },
-      { status: 400 }
-    );
-  }
+  let fileBuffer: Buffer;
+  let fileName: string;
+  let fileSize: number;
+  let ext: string;
 
-  const file = formData.get('file') as File;
+  // Check content type to determine if it's JSON (blob URL) or FormData (file upload)
+  const contentType = request.headers.get('content-type') || '';
 
-  if (!file) {
-    return NextResponse.json(
-      { error: 'ファイルが必要です' },
-      { status: 400 }
-    );
+  if (contentType.includes('application/json')) {
+    // Handle blob URL
+    const body = await request.json();
+    const { blobUrl, name, size } = body;
+
+    if (!blobUrl || typeof blobUrl !== 'string') {
+      return NextResponse.json(
+        { error: 'Blob URLが必要です' },
+        { status: 400 }
+      );
+    }
+
+    // Security: Validate blob URL is from Vercel
+    if (!blobUrl.includes('.vercel-storage.com') && !blobUrl.includes('.public.blob.vercel-storage.com')) {
+      return NextResponse.json(
+        { error: '無効なBlob URLです' },
+        { status: 400 }
+      );
+    }
+
+    fileName = name || 'audio.m4a';
+    fileSize = size || 0;
+    ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase() || '.m4a';
+
+    // Download from blob
+    const response = await fetch(blobUrl);
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: 'ファイルのダウンロードに失敗しました' },
+        { status: 400 }
+      );
+    }
+    fileBuffer = Buffer.from(await response.arrayBuffer());
+    fileSize = fileBuffer.length;
+
+  } else {
+    // Handle direct file upload (for small files < 4MB)
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return NextResponse.json(
+        { error: 'ファイルが必要です' },
+        { status: 400 }
+      );
+    }
+
+    const file = formData.get('file') as File;
+
+    if (!file) {
+      return NextResponse.json(
+        { error: 'ファイルが必要です' },
+        { status: 400 }
+      );
+    }
+
+    fileName = file.name;
+    fileSize = file.size;
+    ext = path.extname(fileName).toLowerCase() || '.m4a';
+    fileBuffer = Buffer.from(await file.arrayBuffer());
   }
 
   // Security: Validate file type
-  const ext = path.extname(file.name).toLowerCase() || '.m4a';
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     return NextResponse.json(
       { error: '対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。' },
@@ -172,17 +222,12 @@ export async function POST(request: NextRequest) {
 
   // Security: Validate file size (max 500MB)
   const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
-  if (file.size > MAX_UPLOAD_SIZE) {
+  if (fileSize > MAX_UPLOAD_SIZE) {
     return NextResponse.json(
       { error: 'ファイルサイズが大きすぎます。最大500MBまで対応しています。' },
       { status: 400 }
     );
   }
-
-  // Store file data before streaming starts
-  const fileBuffer = Buffer.from(await file.arrayBuffer());
-  const fileName = file.name;
-  const fileSize = file.size;
 
   // Create a streaming response
   const stream = new ReadableStream({
@@ -227,7 +272,7 @@ export async function POST(request: NextRequest) {
             detail: 'AIが音声を解析しています (これには数分かかる場合があります)',
           });
 
-          const audioFile = new File([fileBuffer], fileName, { type: `audio/${ext.slice(1)}` });
+          const audioFile = new File([new Uint8Array(fileBuffer)], fileName, { type: `audio/${ext.slice(1)}` });
           const transcription = await openai.audio.transcriptions.create({
             model: 'whisper-1',
             file: audioFile,
