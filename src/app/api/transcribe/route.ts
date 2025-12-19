@@ -87,8 +87,8 @@ async function transcribeChunk(chunkPath: string): Promise<string> {
   return transcription.text;
 }
 
-// Security: Allowed audio file extensions
-const ALLOWED_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.aac'];
+// Security: Allowed audio/video file extensions (video files will have audio extracted)
+const ALLOWED_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.aac', '.caf', '.mp4', '.mov', '.avi', '.mkv', '.m4v'];
 
 export async function POST(request: NextRequest) {
   // Security: Require authentication
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     const ext = path.extname(file.name).toLowerCase() || '.m4a';
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       return NextResponse.json(
-        { error: '対応していないファイル形式です。mp3, m4a, wav, webm, ogg, flac, aacに対応しています。' },
+        { error: '対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。' },
         { status: 400 }
       );
     }

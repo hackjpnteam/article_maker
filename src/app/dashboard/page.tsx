@@ -460,7 +460,7 @@ export default function Home() {
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept="audio/*"
+                        accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.flac,.webm,.caf,video/*"
                         onChange={handleFileChange}
                         className="hidden"
                       />
@@ -479,8 +479,8 @@ export default function Home() {
                           <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 flex items-center justify-center">
                             <Upload className="w-6 h-6 text-slate-400" />
                           </div>
-                          <p className="text-slate-600">クリックしてファイルを選択</p>
-                          <p className="text-slate-400 text-sm">m4a, mp3, wav（長時間OK・自動分割）</p>
+                          <p className="text-slate-600">タップしてファイルを選択</p>
+                          <p className="text-slate-400 text-sm">音声・動画ファイル対応（長時間OK）</p>
                         </div>
                       )}
                     </div>
