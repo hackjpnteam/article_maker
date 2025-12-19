@@ -168,13 +168,13 @@ async function transcribeChunk(chunkPath: string): Promise<string> {
   return transcription.text;
 }
 
-// Download YouTube audio using ytdl-core (works on Vercel)
+// Download YouTube audio using ytdl-core stream (works on Vercel)
 async function downloadYouTubeAudioWithYtdl(
   videoId: string,
   outputPath: string,
   controller: ReadableStreamDefaultController
 ): Promise<void> {
-  console.log('Downloading audio from YouTube using ytdl-core...');
+  console.log('Downloading audio from YouTube using ytdl-core stream...');
   const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
   sendSSE(controller, {
@@ -193,16 +193,6 @@ async function downloadYouTubeAudioWithYtdl(
     const info = await ytdl.getInfo(videoUrl);
     console.log('Video title:', info.videoDetails.title);
 
-    // Get audio-only format
-    const format = ytdl.chooseFormat(info.formats, {
-      quality: 'highestaudio',
-      filter: 'audioonly'
-    });
-
-    if (!format) {
-      throw new Error('No audio format available');
-    }
-
     sendSSE(controller, {
       type: 'progress',
       step: 'download',
@@ -211,20 +201,45 @@ async function downloadYouTubeAudioWithYtdl(
       detail: `${info.videoDetails.title}`,
     });
 
-    // Download the audio
-    const response = await fetch(format.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
+    // Use ytdl-core's stream with proper options
+    const audioStream = ytdl.default(videoUrl, {
+      quality: 'highestaudio',
+      filter: 'audioonly',
     });
 
-    if (!response.ok) {
-      throw new Error(`Failed to download: ${response.status}`);
-    }
+    // Collect stream data into buffer
+    const chunks: Buffer[] = [];
+    let downloadedBytes = 0;
+    const totalBytes = parseInt(info.formats.find(f => f.hasAudio && !f.hasVideo)?.contentLength || '0') || 10000000;
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    await new Promise<void>((resolve, reject) => {
+      audioStream.on('data', (chunk: Buffer) => {
+        chunks.push(chunk);
+        downloadedBytes += chunk.length;
 
+        // Update progress periodically
+        const progress = Math.min(25 + Math.floor((downloadedBytes / totalBytes) * 20), 45);
+        if (downloadedBytes % 500000 < chunk.length) { // Update every ~500KB
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'download',
+            progress,
+            message: '音声をダウンロード中...',
+            detail: `${(downloadedBytes / 1024 / 1024).toFixed(1)}MB ダウンロード済み`,
+          });
+        }
+      });
+
+      audioStream.on('end', () => {
+        resolve();
+      });
+
+      audioStream.on('error', (err: Error) => {
+        reject(err);
+      });
+    });
+
+    const buffer = Buffer.concat(chunks);
     await writeFile(outputPath, buffer);
 
     const fileSize = buffer.length;
