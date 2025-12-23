@@ -3,7 +3,10 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { del } from '@vercel/blob';
 import OpenAI from 'openai';
-import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
+import { writeFile, unlink, mkdir, readFile, readdir, rmdir, stat } from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { finished } from 'stream/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -146,20 +149,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let fileBuffer: Buffer;
   let fileName: string;
   let fileSize: number;
   let ext: string;
   let blobUrlToDelete: string | null = null;
+  let blobUrl: string | null = null;
+  let smallFileBuffer: Buffer | null = null;
 
   // Check content type to determine if it's JSON (blob URL) or FormData (file upload)
   const contentType = request.headers.get('content-type') || '';
 
   if (contentType.includes('application/json')) {
-    // Handle blob URL
+    // Handle blob URL (large files)
     const body = await request.json();
-    const { blobUrl, name, size } = body;
-    blobUrlToDelete = blobUrl; // Save for cleanup after processing
+    const { blobUrl: url, name, size } = body;
+    blobUrl = url;
+    blobUrlToDelete = url; // Save for cleanup after processing
 
     if (!blobUrl || typeof blobUrl !== 'string') {
       return NextResponse.json(
@@ -179,17 +184,6 @@ export async function POST(request: NextRequest) {
     fileName = name || 'audio.m4a';
     fileSize = size || 0;
     ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase() || '.m4a';
-
-    // Download from blob
-    const response = await fetch(blobUrl);
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: 'ファイルのダウンロードに失敗しました' },
-        { status: 400 }
-      );
-    }
-    fileBuffer = Buffer.from(await response.arrayBuffer());
-    fileSize = fileBuffer.length;
 
   } else {
     // Handle direct file upload (for small files < 4MB)
@@ -215,7 +209,7 @@ export async function POST(request: NextRequest) {
     fileName = file.name;
     fileSize = file.size;
     ext = path.extname(fileName).toLowerCase() || '.m4a';
-    fileBuffer = Buffer.from(await file.arrayBuffer());
+    smallFileBuffer = Buffer.from(await file.arrayBuffer());
   }
 
   // Security: Validate file type
@@ -246,7 +240,7 @@ export async function POST(request: NextRequest) {
         sendSSE(controller, {
           type: 'progress',
           step: 'upload',
-          progress: 10,
+          progress: 5,
           message: 'ファイルを処理中...',
           detail: `${fileName} (${(fileSize / 1024 / 1024).toFixed(1)}MB)`,
         });
@@ -257,7 +251,61 @@ export async function POST(request: NextRequest) {
         // ファイルを一時保存 (Security: use sanitized extension)
         const safeExt = ext.replace(/[^a-z0-9.]/gi, '');
         inputFilePath = path.join(tempDir, `input${safeExt}`);
-        await writeFile(inputFilePath, fileBuffer);
+
+        if (blobUrl) {
+          // Large file: Stream download from Blob to temp file (memory efficient)
+          sendSSE(controller, {
+            type: 'progress',
+            step: 'download',
+            progress: 10,
+            message: 'ファイルをダウンロード中...',
+            detail: `${(fileSize / 1024 / 1024).toFixed(1)}MB をストリーミング中`,
+          });
+
+          const response = await fetch(blobUrl);
+          if (!response.ok || !response.body) {
+            throw new Error('ファイルのダウンロードに失敗しました');
+          }
+
+          // Stream to file instead of loading into memory
+          const fileStream = createWriteStream(inputFilePath);
+          const reader = response.body.getReader();
+
+          let downloadedBytes = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            fileStream.write(Buffer.from(value));
+            downloadedBytes += value.length;
+
+            // Update progress every 5MB
+            if (downloadedBytes % (5 * 1024 * 1024) < value.length) {
+              const progress = Math.min(15, 10 + Math.floor((downloadedBytes / fileSize) * 5));
+              sendSSE(controller, {
+                type: 'progress',
+                step: 'download',
+                progress,
+                message: 'ファイルをダウンロード中...',
+                detail: `${(downloadedBytes / 1024 / 1024).toFixed(1)}MB / ${(fileSize / 1024 / 1024).toFixed(1)}MB`,
+              });
+            }
+          }
+
+          await new Promise<void>((resolve, reject) => {
+            fileStream.end((err: Error | null) => err ? reject(err) : resolve());
+          });
+
+          // Get actual file size
+          const fileStat = await stat(inputFilePath);
+          fileSize = fileStat.size;
+
+        } else if (smallFileBuffer) {
+          // Small file: Direct write
+          await writeFile(inputFilePath, smallFileBuffer);
+        } else {
+          throw new Error('ファイルデータがありません');
+        }
 
         sendSSE(controller, {
           type: 'progress',
@@ -278,6 +326,8 @@ export async function POST(request: NextRequest) {
             detail: 'AIが音声を解析しています (これには数分かかる場合があります)',
           });
 
+          // Read file for Whisper API
+          const fileBuffer = await readFile(inputFilePath);
           const audioFile = new File([new Uint8Array(fileBuffer)], fileName, { type: `audio/${ext.slice(1)}` });
           const transcription = await openai.audio.transcriptions.create({
             model: 'whisper-1',
