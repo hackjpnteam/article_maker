@@ -147,7 +147,9 @@ export async function splitAudioFile(
 
     // Read the output file
     const data = await ff.readFile(outputFileName);
-    const blob = new Blob([data], { type: 'audio/mp3' });
+    // Convert Uint8Array to Blob (need to create a new Uint8Array to satisfy TypeScript)
+    const uint8Array = new Uint8Array(data as Uint8Array);
+    const blob = new Blob([uint8Array], { type: 'audio/mp3' });
 
     chunks.push({
       blob,
