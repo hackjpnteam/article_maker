@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { del } from '@vercel/blob';
 import OpenAI from 'openai';
 import { writeFile, unlink, mkdir, readFile, readdir, rmdir } from 'fs/promises';
 import { exec } from 'child_process';
@@ -149,6 +150,7 @@ export async function POST(request: NextRequest) {
   let fileName: string;
   let fileSize: number;
   let ext: string;
+  let blobUrlToDelete: string | null = null;
 
   // Check content type to determine if it's JSON (blob URL) or FormData (file upload)
   const contentType = request.headers.get('content-type') || '';
@@ -157,6 +159,7 @@ export async function POST(request: NextRequest) {
     // Handle blob URL
     const body = await request.json();
     const { blobUrl, name, size } = body;
+    blobUrlToDelete = blobUrl; // Save for cleanup after processing
 
     if (!blobUrl || typeof blobUrl !== 'string') {
       return NextResponse.json(
@@ -350,7 +353,7 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // Cleanup
+        // Cleanup temp files
         try {
           const files = await readdir(tempDir);
           for (const f of files) {
@@ -359,6 +362,16 @@ export async function POST(request: NextRequest) {
           await rmdir(tempDir).catch(() => {});
         } catch {
           // Ignore cleanup errors
+        }
+
+        // Delete blob from Vercel storage
+        if (blobUrlToDelete) {
+          try {
+            await del(blobUrlToDelete);
+            console.log('Deleted blob:', blobUrlToDelete);
+          } catch (e) {
+            console.error('Failed to delete blob:', e);
+          }
         }
 
         controller.close();
@@ -379,6 +392,16 @@ export async function POST(request: NextRequest) {
           await rmdir(tempDir).catch(() => {});
         } catch {
           // Ignore cleanup errors
+        }
+
+        // Delete blob even on error
+        if (blobUrlToDelete) {
+          try {
+            await del(blobUrlToDelete);
+            console.log('Deleted blob after error:', blobUrlToDelete);
+          } catch (e) {
+            console.error('Failed to delete blob:', e);
+          }
         }
 
         controller.close();
