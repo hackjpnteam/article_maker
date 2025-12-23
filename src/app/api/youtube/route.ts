@@ -47,21 +47,40 @@ function sendSSE(controller: ReadableStreamDefaultController, data: SSEData) {
 }
 
 // Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
-function getFFmpegPath(): string {
+function getFFmpegPath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('ffmpeg-static');
-  } catch {
-    return 'ffmpeg';
+    const ffmpegPath = require('ffmpeg-static');
+    // Check if the binary exists
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs');
+    if (fs.existsSync(ffmpegPath)) {
+      console.log('ffmpeg found at:', ffmpegPath);
+      return ffmpegPath;
+    }
+    console.error('ffmpeg binary not found at:', ffmpegPath);
+    return null;
+  } catch (e) {
+    console.error('Failed to load ffmpeg-static:', e);
+    return null;
   }
 }
 
-function getFFprobePath(): string {
+function getFFprobePath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('ffprobe-static').path;
-  } catch {
-    return 'ffprobe';
+    const ffprobePath = require('ffprobe-static').path;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require('fs');
+    if (fs.existsSync(ffprobePath)) {
+      console.log('ffprobe found at:', ffprobePath);
+      return ffprobePath;
+    }
+    console.error('ffprobe binary not found at:', ffprobePath);
+    return null;
+  } catch (e) {
+    console.error('Failed to load ffprobe-static:', e);
+    return null;
   }
 }
 
@@ -114,21 +133,39 @@ async function tryGetCaptions(videoId: string): Promise<string | null> {
   return null;
 }
 
-async function getAudioDuration(filePath: string): Promise<number> {
-  try {
-    const ffprobePath = getFFprobePath();
-    const { stdout } = await execAsync(
-      `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
-    );
-    return parseFloat(stdout.trim());
-  } catch (error) {
-    console.error('Failed to get duration:', error);
-    return 0;
+async function getAudioDuration(filePath: string, fileSize: number): Promise<number> {
+  const ffprobePath = getFFprobePath();
+
+  if (ffprobePath) {
+    try {
+      const { stdout } = await execAsync(
+        `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+      );
+      const duration = parseFloat(stdout.trim());
+      if (duration > 0) {
+        console.log(`Audio duration from ffprobe: ${Math.floor(duration / 60)}min ${Math.floor(duration % 60)}sec`);
+        return duration;
+      }
+    } catch (error) {
+      console.error('Failed to get duration with ffprobe:', error);
+    }
   }
+
+  // Fallback: estimate duration based on file size
+  // Assume average bitrate of 128kbps (16KB/s) for audio
+  const estimatedDuration = fileSize / (16 * 1024);
+  console.log(`Estimated duration from file size (${(fileSize / 1024 / 1024).toFixed(1)}MB): ${Math.floor(estimatedDuration / 60)}min`);
+  return estimatedDuration;
 }
 
-async function splitAudio(inputPath: string, outputDir: string): Promise<string[]> {
-  const duration = await getAudioDuration(inputPath);
+async function splitAudio(inputPath: string, outputDir: string, fileSize: number): Promise<string[]> {
+  const ffmpegPath = getFFmpegPath();
+
+  if (!ffmpegPath) {
+    throw new Error('音声分割機能が利用できません。24MB以下のファイルをお試しください。');
+  }
+
+  const duration = await getAudioDuration(inputPath, fileSize);
   const chunks: string[] = [];
 
   if (duration <= 0) {
@@ -136,7 +173,6 @@ async function splitAudio(inputPath: string, outputDir: string): Promise<string[
   }
 
   const numChunks = Math.ceil(duration / CHUNK_DURATION);
-  const ffmpegPath = getFFmpegPath();
 
   console.log(`Video duration: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒, splitting into ${numChunks} chunks`);
 
@@ -405,7 +441,7 @@ export async function POST(request: NextRequest) {
               detail: `大きなファイル (${(fileSize / 1024 / 1024).toFixed(1)}MB) のため分割処理しています`,
             });
 
-            const chunks = await splitAudio(audioPath, tempDir);
+            const chunks = await splitAudio(audioPath, tempDir, fileSize);
             const transcriptions: string[] = [];
 
             for (let i = 0; i < chunks.length; i++) {

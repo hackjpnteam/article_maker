@@ -158,7 +158,9 @@ export default function Home() {
         setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
         setTranscribeProgress(5);
 
-        const blob = await upload(`audio/${Date.now()}_${fileToProcess.name}`, fileToProcess, {
+        // Generate unique filename to avoid "blob already exists" error
+        const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+        const blob = await upload(`audio/${uniqueId}_${fileToProcess.name}`, fileToProcess, {
           access: 'public',
           handleUploadUrl: '/api/upload',
         });
