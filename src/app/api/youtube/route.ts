@@ -162,7 +162,11 @@ async function splitAudio(inputPath: string, outputDir: string, fileSize: number
   const ffmpegPath = getFFmpegPath();
 
   if (!ffmpegPath) {
-    throw new Error('音声分割機能が利用できません。24MB以下のファイルをお試しください。');
+    // ffmpegが利用できない場合は明確なエラーメッセージ
+    throw new Error(
+      'この動画は字幕がなく、音声ファイルが25MBを超えているため処理できません。' +
+      '字幕付きの動画をお試しいただくか、短い動画をご利用ください。'
+    );
   }
 
   const duration = await getAudioDuration(inputPath, fileSize);

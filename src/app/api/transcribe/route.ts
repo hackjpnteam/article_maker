@@ -114,7 +114,10 @@ async function splitAudio(
   const ffmpegPath = getFFmpegPath();
 
   if (!ffmpegPath) {
-    throw new Error('音声分割機能が利用できません。24MB以下のファイルをお試しください。');
+    throw new Error(
+      '25MBを超える音声ファイルは現在処理できません。' +
+      'ファイルを分割するか、25MB以下のファイルをアップロードしてください。'
+    );
   }
 
   const duration = await getAudioDuration(inputPath, fileSize);
