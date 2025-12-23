@@ -69,7 +69,8 @@ async function getAudioDuration(ffmpeg: FFmpeg, inputFileName: string): Promise<
   // FFmpeg will output duration info in stderr
   let duration = 0;
 
-  const originalLog = ffmpeg.on('log', ({ message }) => {
+  // Listen for duration in FFmpeg output
+  ffmpeg.on('log', ({ message }) => {
     // Parse duration from FFmpeg output
     // Format: Duration: 00:05:30.00
     const match = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
