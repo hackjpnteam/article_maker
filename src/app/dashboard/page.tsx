@@ -95,6 +95,8 @@ export default function Home() {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       setFile(selectedFile);
+      // Auto-start transcription after file selection
+      handleTranscribe(selectedFile);
     }
   };
 
