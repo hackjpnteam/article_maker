@@ -1,10 +1,5 @@
 'use client';
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
-let ffmpeg: FFmpeg | null = null;
-
 export type SplitProgress = {
   stage: 'loading' | 'analyzing' | 'splitting' | 'done';
   progress: number;
@@ -23,24 +18,13 @@ export type AudioChunk = {
 const CHUNK_DURATION = 600; // 10 minutes per chunk
 const MAX_CHUNK_SIZE = 24 * 1024 * 1024; // 24MB target size per chunk
 
-async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promise<FFmpeg> {
-  if (ffmpeg && ffmpeg.loaded) {
-    return ffmpeg;
+// Lazy load FFmpeg to avoid bundling issues
+let ffmpegInstance: any = null;
+
+async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promise<any> {
+  if (ffmpegInstance && ffmpegInstance.loaded) {
+    return ffmpegInstance;
   }
-
-  ffmpeg = new FFmpeg();
-
-  ffmpeg.on('log', ({ message }) => {
-    console.log('[FFmpeg]', message);
-  });
-
-  ffmpeg.on('progress', ({ progress }) => {
-    onProgress({
-      stage: 'splitting',
-      progress: Math.round(progress * 100),
-      message: `音声を分割中... ${Math.round(progress * 100)}%`,
-    });
-  });
 
   onProgress({
     stage: 'loading',
@@ -48,9 +32,27 @@ async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promis
     message: 'FFmpegを読み込み中...',
   });
 
+  // Dynamic import to avoid Turbopack issues
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+  const { toBlobURL } = await import('@ffmpeg/util');
+
+  ffmpegInstance = new FFmpeg();
+
+  ffmpegInstance.on('log', ({ message }: { message: string }) => {
+    console.log('[FFmpeg]', message);
+  });
+
+  ffmpegInstance.on('progress', ({ progress }: { progress: number }) => {
+    onProgress({
+      stage: 'splitting',
+      progress: Math.round(progress * 100),
+      message: `音声を分割中... ${Math.round(progress * 100)}%`,
+    });
+  });
+
   // Load FFmpeg core from CDN
   const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-  await ffmpeg.load({
+  await ffmpegInstance.load({
     coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
     wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
   });
@@ -61,18 +63,14 @@ async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promis
     message: 'FFmpeg読み込み完了',
   });
 
-  return ffmpeg;
+  return ffmpegInstance;
 }
 
-async function getAudioDuration(ffmpeg: FFmpeg, inputFileName: string): Promise<number> {
-  // Use ffprobe-like approach to get duration
-  // FFmpeg will output duration info in stderr
+async function getAudioDuration(ffmpeg: any, inputFileName: string): Promise<number> {
   let duration = 0;
 
   // Listen for duration in FFmpeg output
-  ffmpeg.on('log', ({ message }) => {
-    // Parse duration from FFmpeg output
-    // Format: Duration: 00:05:30.00
+  ffmpeg.on('log', ({ message }: { message: string }) => {
     const match = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
     if (match) {
       const hours = parseInt(match[1], 10);
@@ -82,7 +80,6 @@ async function getAudioDuration(ffmpeg: FFmpeg, inputFileName: string): Promise<
     }
   });
 
-  // Run a quick probe by trying to get info
   try {
     await ffmpeg.exec(['-i', inputFileName, '-f', 'null', '-t', '0.1', '-']);
   } catch {
@@ -96,6 +93,9 @@ export async function splitAudioFile(
   file: File,
   onProgress: (progress: SplitProgress) => void
 ): Promise<AudioChunk[]> {
+  // Dynamic import fetchFile when needed
+  const { fetchFile } = await import('@ffmpeg/util');
+
   const ff = await loadFFmpeg(onProgress);
 
   onProgress({
@@ -139,15 +139,14 @@ export async function splitAudioFile(
       '-ss', startTime.toString(),
       '-t', chunkDuration.toString(),
       '-acodec', 'libmp3lame',
-      '-ar', '16000',      // 16kHz sample rate (good for speech)
-      '-ac', '1',          // Mono
-      '-b:a', '64k',       // 64kbps bitrate
+      '-ar', '16000',
+      '-ac', '1',
+      '-b:a', '64k',
       outputFileName,
     ]);
 
     // Read the output file
     const data = await ff.readFile(outputFileName);
-    // Convert Uint8Array to Blob (need to create a new Uint8Array to satisfy TypeScript)
     const uint8Array = new Uint8Array(data as Uint8Array);
     const blob = new Blob([uint8Array], { type: 'audio/mp3' });
 
@@ -181,6 +180,5 @@ function getExtension(filename: string): string {
 }
 
 export function shouldSplitFile(file: File): boolean {
-  // Split if file is larger than 24MB (Whisper limit is 25MB, leave some margin)
   return file.size > MAX_CHUNK_SIZE;
 }
