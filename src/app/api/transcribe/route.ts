@@ -16,7 +16,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MAX_FILE_SIZE = 24 * 1024 * 1024; // 24MB (余裕を持たせる)
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB (Whisper's actual limit)
 const CHUNK_DURATION = 600; // 10分ごとに分割
 
 type ProgressData = {
