@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { put } from '@vercel/blob';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 
 // Security: Allowed audio/video file extensions
 const ALLOWED_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.aac', '.caf', '.mp4', '.mov', '.avi', '.mkv', '.m4v'];
@@ -17,51 +17,52 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
+    const body = (await request.json()) as HandleUploadBody;
 
-    if (!file) {
-      return NextResponse.json(
-        { error: 'ファイルが必要です' },
-        { status: 400 }
-      );
-    }
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      onBeforeGenerateToken: async (pathname) => {
+        // Validate file extension
+        const ext = pathname.substring(pathname.lastIndexOf('.')).toLowerCase();
+        if (!ALLOWED_EXTENSIONS.includes(ext)) {
+          throw new Error('対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。');
+        }
 
-    // Security: Validate file type
-    const fileName = file.name || 'audio.m4a';
-    const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase() || '.m4a';
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return NextResponse.json(
-        { error: '対応していないファイル形式です。音声(mp3, m4a, wav等)または動画(mp4, mov等)ファイルをアップロードしてください。' },
-        { status: 400 }
-      );
-    }
-
-    // Security: Validate file size (max 500MB)
-    const MAX_UPLOAD_SIZE = 500 * 1024 * 1024;
-    if (file.size > MAX_UPLOAD_SIZE) {
-      return NextResponse.json(
-        { error: 'ファイルサイズが大きすぎます。最大500MBまで対応しています。' },
-        { status: 400 }
-      );
-    }
-
-    // Upload to Vercel Blob
-    const blob = await put(`audio/${Date.now()}_${fileName}`, file, {
-      access: 'public',
-      addRandomSuffix: true,
+        return {
+          allowedContentTypes: [
+            'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a', 'audio/x-m4a',
+            'audio/wav', 'audio/x-wav', 'audio/webm', 'audio/ogg', 'audio/flac',
+            'audio/aac', 'audio/x-caf',
+            'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm',
+            'application/octet-stream', // Some browsers send this for audio files
+          ],
+          maximumSizeInBytes: 500 * 1024 * 1024, // 500MB
+          tokenPayload: JSON.stringify({
+            userId: session.user?.email,
+          }),
+        };
+      },
+      onUploadCompleted: async ({ blob }) => {
+        console.log('Upload completed:', blob.url);
+      },
     });
 
-    return NextResponse.json({
-      url: blob.url,
-      size: file.size,
-      name: fileName,
-    });
-
+    return NextResponse.json(jsonResponse);
   } catch (error) {
     console.error('Upload error:', error);
+    const errorMessage = (error as Error).message;
+
+    // Provide user-friendly error messages
+    if (errorMessage.includes('BLOB_READ_WRITE_TOKEN') || errorMessage.includes('token')) {
+      return NextResponse.json(
+        { error: 'ファイルストレージが設定されていません。管理者にお問い合わせください。' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'アップロードに失敗しました: ' + (error as Error).message },
+      { error: errorMessage || 'アップロードに失敗しました。もう一度お試しください。' },
       { status: 500 }
     );
   }

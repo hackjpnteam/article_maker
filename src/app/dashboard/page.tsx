@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { upload } from '@vercel/blob/client';
 import { Article } from '@/lib/types';
 import {
   Mic,
@@ -65,6 +66,7 @@ export default function Home() {
   const [articles, setArticles] = useState<Article[]>([]);
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -96,8 +98,48 @@ export default function Home() {
     }
   };
 
-  const handleTranscribe = async () => {
-    if (!file) return;
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!isTranscribing) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    if (isTranscribing) return;
+
+    const droppedFile = e.dataTransfer.files?.[0];
+    if (droppedFile) {
+      // Check if it's an audio/video file
+      const validTypes = ['audio/', 'video/'];
+      const validExtensions = ['.mp3', '.m4a', '.wav', '.webm', '.ogg', '.flac', '.aac', '.caf', '.mp4', '.mov', '.avi', '.mkv', '.m4v'];
+      const isValidType = validTypes.some(type => droppedFile.type.startsWith(type));
+      const isValidExt = validExtensions.some(ext => droppedFile.name.toLowerCase().endsWith(ext));
+
+      if (isValidType || isValidExt) {
+        setFile(droppedFile);
+        // Auto-start transcription
+        handleTranscribe(droppedFile);
+      } else {
+        alert('対応していないファイル形式です。音声または動画ファイルをドロップしてください。');
+      }
+    }
+  };
+
+  const handleTranscribe = async (targetFile?: File) => {
+    const fileToProcess = targetFile || file;
+    if (!fileToProcess) return;
 
     setIsTranscribing(true);
     setTranscribeStatus('ファイルをアップロード中...');
@@ -108,26 +150,17 @@ export default function Home() {
       const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4MB - Vercel's limit
       let transcribeRes: Response;
 
-      if (file.size > DIRECT_UPLOAD_LIMIT) {
-        // Large file: Upload to Vercel Blob first
+      if (fileToProcess.size > DIRECT_UPLOAD_LIMIT) {
+        // Large file: Upload to Vercel Blob using client-side upload
         setTranscribeStatus('大きいファイルをアップロード中...');
-        setTranscribeDetail(`${(file.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
+        setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
         setTranscribeProgress(5);
 
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const uploadRes = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
+        const blob = await upload(fileToProcess.name, fileToProcess, {
+          access: 'public',
+          handleUploadUrl: '/api/upload',
         });
 
-        if (!uploadRes.ok) {
-          const errorData = await uploadRes.json();
-          throw new Error(errorData.error || 'アップロードに失敗しました');
-        }
-
-        const uploadData = await uploadRes.json();
         setTranscribeProgress(10);
         setTranscribeStatus('文字起こしを開始...');
 
@@ -136,15 +169,15 @@ export default function Home() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            blobUrl: uploadData.url,
-            name: uploadData.name,
-            size: uploadData.size,
+            blobUrl: blob.url,
+            name: fileToProcess.name,
+            size: fileToProcess.size,
           }),
         });
       } else {
         // Small file: Direct upload
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', fileToProcess);
 
         transcribeRes = await fetch('/api/transcribe', {
           method: 'POST',
@@ -527,9 +560,14 @@ export default function Home() {
                   <div>
                     <div
                       onClick={() => !isTranscribing && fileInputRef.current?.click()}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
                       className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-all ${
                         isTranscribing
                           ? 'border-emerald-400 bg-emerald-50 cursor-not-allowed'
+                          : isDragging
+                          ? 'border-violet-500 bg-violet-100 scale-[1.02] shadow-lg'
                           : file
                           ? 'border-violet-400 bg-violet-50 cursor-pointer'
                           : 'border-slate-300 hover:border-violet-400 hover:bg-slate-50 cursor-pointer'
@@ -543,7 +581,15 @@ export default function Home() {
                         className="hidden"
                         disabled={isTranscribing}
                       />
-                      {file ? (
+                      {isDragging ? (
+                        <div className="space-y-2">
+                          <div className="w-12 h-12 mx-auto rounded-full bg-violet-200 flex items-center justify-center animate-pulse">
+                            <Upload className="w-6 h-6 text-violet-600" />
+                          </div>
+                          <p className="text-violet-700 font-medium">ここにドロップして文字起こし開始</p>
+                          <p className="text-violet-500 text-sm">音声・動画ファイル対応</p>
+                        </div>
+                      ) : file ? (
                         <div className="space-y-2">
                           <div className="w-12 h-12 mx-auto rounded-full bg-violet-100 flex items-center justify-center">
                             <FileAudio className="w-6 h-6 text-violet-600" />
@@ -558,8 +604,8 @@ export default function Home() {
                           <div className="w-12 h-12 mx-auto rounded-full bg-slate-100 flex items-center justify-center">
                             <Upload className="w-6 h-6 text-slate-400" />
                           </div>
-                          <p className="text-slate-600">タップしてファイルを選択</p>
-                          <p className="text-slate-400 text-sm">音声・動画ファイル対応（長時間OK）</p>
+                          <p className="text-slate-600">ファイルをドラッグ&ドロップ</p>
+                          <p className="text-slate-400 text-sm">またはクリックして選択（長時間OK）</p>
                         </div>
                       )}
                     </div>

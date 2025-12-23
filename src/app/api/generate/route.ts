@@ -185,3 +185,6 @@ ${text}
     );
   }
 }
+
+// Increase timeout for long article generation
+export const maxDuration = 60;

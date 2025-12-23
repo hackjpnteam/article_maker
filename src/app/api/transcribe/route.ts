@@ -118,7 +118,7 @@ async function splitAudio(
 
 async function transcribeChunk(chunkPath: string): Promise<string> {
   const audioBuffer = await readFile(chunkPath);
-  const file = new File([audioBuffer], path.basename(chunkPath), { type: 'audio/mp3' });
+  const file = new File([new Uint8Array(audioBuffer)], path.basename(chunkPath), { type: 'audio/mp3' });
 
   const transcription = await openai.audio.transcriptions.create({
     model: 'whisper-1',

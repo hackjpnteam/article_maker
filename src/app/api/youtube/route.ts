@@ -4,7 +4,6 @@ import { authOptions } from '@/lib/auth';
 import { YoutubeTranscript } from 'youtube-transcript';
 import OpenAI from 'openai';
 import { unlink, mkdir, readFile, readdir, rmdir, writeFile } from 'fs/promises';
-import { createWriteStream } from 'fs';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -157,7 +156,7 @@ async function splitAudio(inputPath: string, outputDir: string): Promise<string[
 
 async function transcribeChunk(chunkPath: string): Promise<string> {
   const audioBuffer = await readFile(chunkPath);
-  const file = new File([audioBuffer], path.basename(chunkPath), { type: 'audio/mp3' });
+  const file = new File([new Uint8Array(audioBuffer)], path.basename(chunkPath), { type: 'audio/mp3' });
 
   const transcription = await openai.audio.transcriptions.create({
     model: 'whisper-1',
@@ -376,7 +375,7 @@ export async function POST(request: NextRequest) {
               detail: 'AIが音声を解析しています (これには数分かかる場合があります)',
             });
 
-            const file = new File([audioBuffer], 'audio.webm', { type: 'audio/webm' });
+            const file = new File([new Uint8Array(audioBuffer)], 'audio.webm', { type: 'audio/webm' });
             const transcription = await openai.audio.transcriptions.create({
               file: file,
               model: 'whisper-1',
