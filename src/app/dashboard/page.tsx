@@ -633,7 +633,7 @@ export default function Home() {
                     )}
 
                     <button
-                      onClick={handleTranscribe}
+                      onClick={() => handleTranscribe()}
                       disabled={!file || isTranscribing}
                       className="w-full mt-4 py-3 rounded-xl font-medium transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40"
                     >
