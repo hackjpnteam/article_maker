@@ -6,21 +6,17 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '500mb',
     },
   },
-  // Include ffmpeg/ffprobe binaries in serverless function
+  // Include ffmpeg/ffprobe binaries in serverless function bundle
   outputFileTracingIncludes: {
     '/api/transcribe': [
-      './node_modules/ffmpeg-static/ffmpeg',
-      './node_modules/ffprobe-static/bin/linux/x64/ffprobe',
+      './node_modules/ffmpeg-static/**/*',
+      './node_modules/ffprobe-static/**/*',
     ],
     '/api/youtube': [
-      './node_modules/ffmpeg-static/ffmpeg',
-      './node_modules/ffprobe-static/bin/linux/x64/ffprobe',
+      './node_modules/ffmpeg-static/**/*',
+      './node_modules/ffprobe-static/**/*',
     ],
   },
 };
 
 export default nextConfig;
-
-// Note: Vercel has hard limits on request body size for serverless functions
-// - Hobby: 4.5MB, Pro: 5MB
-// For larger files, consider using Vercel Blob or chunked uploads

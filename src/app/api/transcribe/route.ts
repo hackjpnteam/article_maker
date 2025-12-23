@@ -5,8 +5,6 @@ import { del } from '@vercel/blob';
 import OpenAI from 'openai';
 import { writeFile, unlink, mkdir, readFile, readdir, rmdir, stat } from 'fs/promises';
 import { createWriteStream } from 'fs';
-import { Readable } from 'stream';
-import { finished } from 'stream/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
@@ -50,34 +48,54 @@ function sendSSE(controller: ReadableStreamDefaultController, data: SSEData) {
 }
 
 // Get ffmpeg path (use ffmpeg-static on Vercel, system ffmpeg locally)
-function getFFmpegPath(): string {
+function getFFmpegPath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('ffmpeg-static');
-  } catch {
-    return 'ffmpeg';
+    const ffmpegPath = require('ffmpeg-static');
+    // Check if the binary exists
+    const fs = require('fs');
+    if (fs.existsSync(ffmpegPath)) {
+      console.log('ffmpeg found at:', ffmpegPath);
+      return ffmpegPath;
+    }
+    console.error('ffmpeg binary not found at:', ffmpegPath);
+    return null;
+  } catch (e) {
+    console.error('Failed to load ffmpeg-static:', e);
+    return null;
   }
 }
 
-function getFFprobePath(): string {
+function getFFprobePath(): string | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('ffprobe-static').path;
-  } catch {
-    return 'ffprobe';
+    const ffprobePath = require('ffprobe-static').path;
+    const fs = require('fs');
+    if (fs.existsSync(ffprobePath)) {
+      console.log('ffprobe found at:', ffprobePath);
+      return ffprobePath;
+    }
+    console.error('ffprobe binary not found at:', ffprobePath);
+    return null;
+  } catch (e) {
+    console.error('Failed to load ffprobe-static:', e);
+    return null;
   }
 }
 
 async function getAudioDuration(filePath: string, fileSize: number): Promise<number> {
-  try {
-    const ffprobePath = getFFprobePath();
-    const { stdout } = await execAsync(
-      `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
-    );
-    const duration = parseFloat(stdout.trim());
-    if (duration > 0) return duration;
-  } catch (error) {
-    console.error('Failed to get duration with ffprobe:', error);
+  const ffprobePath = getFFprobePath();
+
+  if (ffprobePath) {
+    try {
+      const { stdout } = await execAsync(
+        `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
+      );
+      const duration = parseFloat(stdout.trim());
+      if (duration > 0) return duration;
+    } catch (error) {
+      console.error('Failed to get duration with ffprobe:', error);
+    }
   }
 
   // Fallback: estimate duration based on file size
@@ -93,11 +111,16 @@ async function splitAudio(
   controller: ReadableStreamDefaultController,
   fileSize: number
 ): Promise<string[]> {
+  const ffmpegPath = getFFmpegPath();
+
+  if (!ffmpegPath) {
+    throw new Error('音声分割機能が利用できません。24MB以下のファイルをお試しください。');
+  }
+
   const duration = await getAudioDuration(inputPath, fileSize);
   const chunks: string[] = [];
 
   const numChunks = Math.ceil(duration / CHUNK_DURATION);
-  const ffmpegPath = getFFmpegPath();
 
   console.log(`Audio duration: ${Math.floor(duration / 60)}分${Math.floor(duration % 60)}秒, splitting into ${numChunks} chunks`);
 
