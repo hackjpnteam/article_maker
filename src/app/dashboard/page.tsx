@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { upload } from '@vercel/blob/client';
 import { Article } from '@/lib/types';
+import { splitAudioFile, shouldSplitFile, type SplitProgress } from '@/lib/audioSplitter';
 import {
   Mic,
   FileText,
@@ -139,98 +140,161 @@ export default function Home() {
     }
   };
 
+  // Helper function to transcribe a single chunk
+  const transcribeSingleFile = async (fileOrBlob: File | Blob, fileName: string): Promise<string> => {
+    const formData = new FormData();
+    const file = fileOrBlob instanceof File ? fileOrBlob : new File([fileOrBlob], fileName, { type: 'audio/mp3' });
+    formData.append('file', file);
+
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || 'エラーが発生しました');
+    }
+
+    // Read SSE response
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('ストリーミングがサポートされていません');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let resultText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === 'result') {
+            resultText = data.text;
+          } else if (data.type === 'error') {
+            throw new Error(data.error);
+          }
+        }
+      }
+    }
+
+    return resultText;
+  };
+
   const handleTranscribe = async (targetFile?: File) => {
     const fileToProcess = targetFile || file;
     if (!fileToProcess) return;
 
     setIsTranscribing(true);
-    setTranscribeStatus('ファイルをアップロード中...');
+    setTranscribeStatus('ファイルを確認中...');
     setTranscribeProgress(0);
     setTranscribeDetail('');
 
     try {
-      const DIRECT_UPLOAD_LIMIT = 4 * 1024 * 1024; // 4MB - Vercel's limit
-      let transcribeRes: Response;
+      // Check if file needs to be split (> 24MB)
+      if (shouldSplitFile(fileToProcess)) {
+        // Large file: Split using client-side FFmpeg.wasm
+        setTranscribeStatus('大きいファイルを検出...');
+        setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB - ブラウザで分割処理します`);
 
-      if (fileToProcess.size > DIRECT_UPLOAD_LIMIT) {
-        // Large file: Upload to Vercel Blob using client-side upload
-        setTranscribeStatus('大きいファイルをアップロード中...');
-        setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
-        setTranscribeProgress(5);
-
-        // Generate unique filename to avoid "blob already exists" error
-        const uniqueId = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-        const blob = await upload(`audio/${uniqueId}_${fileToProcess.name}`, fileToProcess, {
-          access: 'public',
-          handleUploadUrl: '/api/upload',
+        // Split the audio file using FFmpeg.wasm
+        const chunks = await splitAudioFile(fileToProcess, (progress: SplitProgress) => {
+          if (progress.stage === 'loading') {
+            setTranscribeStatus('FFmpegを準備中...');
+            setTranscribeProgress(Math.round(progress.progress * 0.1)); // 0-10%
+          } else if (progress.stage === 'analyzing') {
+            setTranscribeStatus('音声を解析中...');
+            setTranscribeProgress(10 + Math.round(progress.progress * 0.05)); // 10-15%
+          } else if (progress.stage === 'splitting') {
+            setTranscribeStatus(progress.message);
+            setTranscribeDetail(progress.currentChunk ? `パート ${progress.currentChunk}/${progress.totalChunks}` : '');
+            setTranscribeProgress(15 + Math.round(progress.progress * 0.25)); // 15-40%
+          }
         });
 
-        setTranscribeProgress(10);
-        setTranscribeStatus('文字起こしを開始...');
+        // Transcribe each chunk
+        const transcriptions: string[] = [];
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i];
+          const chunkProgress = 40 + Math.round((i / chunks.length) * 55); // 40-95%
 
-        // Now call transcribe with blob URL
-        transcribeRes = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            blobUrl: blob.url,
-            name: fileToProcess.name,
-            size: fileToProcess.size,
-          }),
-        });
+          setTranscribeStatus(`文字起こし中... (${i + 1}/${chunks.length})`);
+          setTranscribeDetail(`パート ${i + 1} を処理しています`);
+          setTranscribeProgress(chunkProgress);
+
+          const text = await transcribeSingleFile(chunk.blob, `chunk_${i}.mp3`);
+          transcriptions.push(text);
+        }
+
+        // Combine all transcriptions
+        const fullText = transcriptions.join('\n\n');
+        setTranscription(fullText);
+        setTranscribeStatus(`${chunks.length}パートの文字起こしが完了しました`);
+        setTranscribeProgress(100);
+
       } else {
-        // Small file: Direct upload
+        // Small file: Direct upload and transcribe
+        setTranscribeStatus('文字起こし中...');
+        setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB`);
+        setTranscribeProgress(10);
+
         const formData = new FormData();
         formData.append('file', fileToProcess);
 
-        transcribeRes = await fetch('/api/transcribe', {
+        const transcribeRes = await fetch('/api/transcribe', {
           method: 'POST',
           body: formData,
         });
-      }
 
-      if (!transcribeRes.ok) {
-        const errorData = await transcribeRes.json();
-        throw new Error(errorData.error || 'エラーが発生しました');
-      }
+        if (!transcribeRes.ok) {
+          const errorData = await transcribeRes.json();
+          throw new Error(errorData.error || 'エラーが発生しました');
+        }
 
-      const reader = transcribeRes.body?.getReader();
-      if (!reader) {
-        throw new Error('ストリーミングがサポートされていません');
-      }
+        const reader = transcribeRes.body?.getReader();
+        if (!reader) {
+          throw new Error('ストリーミングがサポートされていません');
+        }
 
-      const decoder = new TextDecoder();
-      let buffer = '';
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
 
-              if (data.type === 'progress') {
-                setTranscribeProgress(data.progress);
-                setTranscribeStatus(data.message);
-                setTranscribeDetail(data.detail || '');
-              } else if (data.type === 'result') {
-                setTranscription(data.text);
-                const statusText = data.chunks
-                  ? `${data.duration}分の音声を${data.chunks}パートで処理完了`
-                  : '文字起こし完了';
-                setTranscribeStatus(statusText);
-                setTranscribeProgress(100);
-              } else if (data.type === 'error') {
-                throw new Error(data.error);
+                if (data.type === 'progress') {
+                  setTranscribeProgress(data.progress);
+                  setTranscribeStatus(data.message);
+                  setTranscribeDetail(data.detail || '');
+                } else if (data.type === 'result') {
+                  setTranscription(data.text);
+                  const statusText = data.chunks
+                    ? `${data.duration}分の音声を${data.chunks}パートで処理完了`
+                    : '文字起こし完了';
+                  setTranscribeStatus(statusText);
+                  setTranscribeProgress(100);
+                } else if (data.type === 'error') {
+                  throw new Error(data.error);
+                }
+              } catch (parseError) {
+                console.error('Parse error:', parseError);
               }
-            } catch (parseError) {
-              console.error('Parse error:', parseError);
             }
           }
         }

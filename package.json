@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
+    "@ffmpeg/ffmpeg": "^0.12.10",
+    "@ffmpeg/util": "^0.12.1",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@vercel/blob": "^2.0.0",
     "bcryptjs": "^3.0.3",
