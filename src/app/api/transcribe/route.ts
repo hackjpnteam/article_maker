@@ -64,30 +64,33 @@ function getFFprobePath(): string {
   }
 }
 
-async function getAudioDuration(filePath: string): Promise<number> {
+async function getAudioDuration(filePath: string, fileSize: number): Promise<number> {
   try {
     const ffprobePath = getFFprobePath();
     const { stdout } = await execAsync(
       `"${ffprobePath}" -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`
     );
-    return parseFloat(stdout.trim());
+    const duration = parseFloat(stdout.trim());
+    if (duration > 0) return duration;
   } catch (error) {
-    console.error('Failed to get duration:', error);
-    return 0;
+    console.error('Failed to get duration with ffprobe:', error);
   }
+
+  // Fallback: estimate duration based on file size
+  // Assume average bitrate of 128kbps (16KB/s) for audio
+  const estimatedDuration = fileSize / (16 * 1024);
+  console.log(`Estimated duration from file size: ${Math.floor(estimatedDuration / 60)}min`);
+  return estimatedDuration;
 }
 
 async function splitAudio(
   inputPath: string,
   outputDir: string,
-  controller: ReadableStreamDefaultController
+  controller: ReadableStreamDefaultController,
+  fileSize: number
 ): Promise<string[]> {
-  const duration = await getAudioDuration(inputPath);
+  const duration = await getAudioDuration(inputPath, fileSize);
   const chunks: string[] = [];
-
-  if (duration <= 0) {
-    throw new Error('音声ファイルの長さを取得できませんでした');
-  }
 
   const numChunks = Math.ceil(duration / CHUNK_DURATION);
   const ffmpegPath = getFFmpegPath();
@@ -304,11 +307,11 @@ export async function POST(request: NextRequest) {
             detail: `大きなファイル (${(fileSize / 1024 / 1024).toFixed(1)}MB) のため分割処理します`,
           });
 
-          const duration = await getAudioDuration(inputFilePath);
+          const duration = await getAudioDuration(inputFilePath, fileSize);
           const durationMinutes = Math.floor(duration / 60);
           console.log(`Audio duration: ${durationMinutes}分${Math.floor(duration % 60)}秒`);
 
-          const chunks = await splitAudio(inputFilePath, tempDir, controller);
+          const chunks = await splitAudio(inputFilePath, tempDir, controller, fileSize);
           console.log(`Split into ${chunks.length} chunks`);
 
           // 各チャンクを文字起こし

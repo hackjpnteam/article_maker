@@ -156,7 +156,7 @@ export default function Home() {
         setTranscribeDetail(`${(fileToProcess.size / 1024 / 1024).toFixed(1)}MB のファイルを処理しています`);
         setTranscribeProgress(5);
 
-        const blob = await upload(fileToProcess.name, fileToProcess, {
+        const blob = await upload(`audio/${Date.now()}_${fileToProcess.name}`, fileToProcess, {
           access: 'public',
           handleUploadUrl: '/api/upload',
         });
