@@ -6,6 +6,17 @@ const nextConfig: NextConfig = {
       bodySizeLimit: '500mb',
     },
   },
+  // Include ffmpeg/ffprobe binaries in serverless function
+  outputFileTracingIncludes: {
+    '/api/transcribe': [
+      './node_modules/ffmpeg-static/ffmpeg',
+      './node_modules/ffprobe-static/bin/linux/x64/ffprobe',
+    ],
+    '/api/youtube': [
+      './node_modules/ffmpeg-static/ffmpeg',
+      './node_modules/ffprobe-static/bin/linux/x64/ffprobe',
+    ],
+  },
 };
 
 export default nextConfig;
