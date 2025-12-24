@@ -27,8 +27,8 @@ async function loadFFmpegFromCDN(): Promise<void> {
   if (FFmpegClass) return;
 
   // Check if already loaded globally
-  if (typeof window !== 'undefined' && (window as any).FFmpeg) {
-    FFmpegClass = (window as any).FFmpeg;
+  if (typeof window !== 'undefined' && (window as any).FFmpegLoaded) {
+    FFmpegClass = (window as any).FFmpegLoaded;
     return;
   }
 
@@ -59,6 +59,13 @@ async function loadFFmpegFromCDN(): Promise<void> {
   });
 }
 
+// Create blob URL from remote URL to bypass CORS for workers
+async function createBlobURL(url: string, type: string): Promise<string> {
+  const response = await fetch(url);
+  const blob = new Blob([await response.arrayBuffer()], { type });
+  return URL.createObjectURL(blob);
+}
+
 async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promise<any> {
   if (ffmpegInstance && ffmpegInstance.loaded) {
     return ffmpegInstance;
@@ -87,21 +94,33 @@ async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promis
     });
   });
 
-  // Load FFmpeg core from CDN
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+  // Load FFmpeg core and worker from CDN as blob URLs (bypass CORS)
+  const coreBaseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+  const ffmpegBaseURL = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm';
 
-  // Fetch and create blob URLs for the core files
-  const coreResponse = await fetch(`${baseURL}/ffmpeg-core.js`);
-  const coreBlob = new Blob([await coreResponse.text()], { type: 'text/javascript' });
-  const coreURL = URL.createObjectURL(coreBlob);
+  onProgress({
+    stage: 'loading',
+    progress: 20,
+    message: 'FFmpegコアを読み込み中...',
+  });
 
-  const wasmResponse = await fetch(`${baseURL}/ffmpeg-core.wasm`);
-  const wasmBlob = new Blob([await wasmResponse.arrayBuffer()], { type: 'application/wasm' });
-  const wasmURL = URL.createObjectURL(wasmBlob);
+  // Create blob URLs for all required files
+  const [coreURL, wasmURL, workerURL] = await Promise.all([
+    createBlobURL(`${coreBaseURL}/ffmpeg-core.js`, 'text/javascript'),
+    createBlobURL(`${coreBaseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    createBlobURL(`${ffmpegBaseURL}/worker.js`, 'text/javascript'),
+  ]);
+
+  onProgress({
+    stage: 'loading',
+    progress: 60,
+    message: 'FFmpegを初期化中...',
+  });
 
   await ffmpegInstance.load({
     coreURL,
     wasmURL,
+    classWorkerURL: workerURL,
   });
 
   onProgress({
