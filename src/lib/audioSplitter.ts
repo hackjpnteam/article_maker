@@ -22,17 +22,41 @@ const MAX_CHUNK_SIZE = 24 * 1024 * 1024; // 24MB target size per chunk
 let ffmpegInstance: any = null;
 let FFmpegClass: any = null;
 
-// Load FFmpeg from CDN (no npm package needed)
+// Load FFmpeg from CDN using script tag (avoids bundler issues)
 async function loadFFmpegFromCDN(): Promise<void> {
   if (FFmpegClass) return;
 
-  // Load the FFmpeg module from unpkg CDN
-  // @ts-ignore - Dynamic import from URL is valid in browser
-  const ffmpegModule = await import(
-    /* webpackIgnore: true */
-    'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'
-  );
-  FFmpegClass = ffmpegModule.FFmpeg;
+  // Check if already loaded globally
+  if (typeof window !== 'undefined' && (window as any).FFmpeg) {
+    FFmpegClass = (window as any).FFmpeg;
+    return;
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.innerHTML = `
+      import { FFmpeg } from 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
+      window.FFmpegLoaded = FFmpeg;
+      window.dispatchEvent(new Event('ffmpeg-loaded'));
+    `;
+
+    const handleLoad = () => {
+      FFmpegClass = (window as any).FFmpegLoaded;
+      window.removeEventListener('ffmpeg-loaded', handleLoad);
+      resolve();
+    };
+
+    window.addEventListener('ffmpeg-loaded', handleLoad);
+    document.head.appendChild(script);
+
+    // Timeout after 30 seconds
+    setTimeout(() => {
+      if (!FFmpegClass) {
+        reject(new Error('FFmpeg の読み込みがタイムアウトしました'));
+      }
+    }, 30000);
+  });
 }
 
 async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promise<any> {
