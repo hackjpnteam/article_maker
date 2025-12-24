@@ -18,8 +18,21 @@ export type AudioChunk = {
 const CHUNK_DURATION = 600; // 10 minutes per chunk
 const MAX_CHUNK_SIZE = 24 * 1024 * 1024; // 24MB target size per chunk
 
-// Lazy load FFmpeg to avoid bundling issues
+// FFmpeg instance loaded from CDN
 let ffmpegInstance: any = null;
+let FFmpegClass: any = null;
+
+// Load FFmpeg from CDN (no npm package needed)
+async function loadFFmpegFromCDN(): Promise<void> {
+  if (FFmpegClass) return;
+
+  // Load the FFmpeg module from unpkg CDN
+  const ffmpegModule = await import(
+    /* webpackIgnore: true */
+    'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'
+  );
+  FFmpegClass = ffmpegModule.FFmpeg;
+}
 
 async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promise<any> {
   if (ffmpegInstance && ffmpegInstance.loaded) {
@@ -32,11 +45,10 @@ async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promis
     message: 'FFmpegを読み込み中...',
   });
 
-  // Dynamic import to avoid Turbopack issues
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-  const { toBlobURL } = await import('@ffmpeg/util');
+  // Load FFmpeg class from CDN
+  await loadFFmpegFromCDN();
 
-  ffmpegInstance = new FFmpeg();
+  ffmpegInstance = new FFmpegClass();
 
   ffmpegInstance.on('log', ({ message }: { message: string }) => {
     console.log('[FFmpeg]', message);
@@ -52,9 +64,19 @@ async function loadFFmpeg(onProgress: (progress: SplitProgress) => void): Promis
 
   // Load FFmpeg core from CDN
   const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+
+  // Fetch and create blob URLs for the core files
+  const coreResponse = await fetch(`${baseURL}/ffmpeg-core.js`);
+  const coreBlob = new Blob([await coreResponse.text()], { type: 'text/javascript' });
+  const coreURL = URL.createObjectURL(coreBlob);
+
+  const wasmResponse = await fetch(`${baseURL}/ffmpeg-core.wasm`);
+  const wasmBlob = new Blob([await wasmResponse.arrayBuffer()], { type: 'application/wasm' });
+  const wasmURL = URL.createObjectURL(wasmBlob);
+
   await ffmpegInstance.load({
-    coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    coreURL,
+    wasmURL,
   });
 
   onProgress({
@@ -70,7 +92,7 @@ async function getAudioDuration(ffmpeg: any, inputFileName: string): Promise<num
   let duration = 0;
 
   // Listen for duration in FFmpeg output
-  ffmpeg.on('log', ({ message }: { message: string }) => {
+  const logHandler = ({ message }: { message: string }) => {
     const match = message.match(/Duration:\s*(\d+):(\d+):(\d+\.\d+)/);
     if (match) {
       const hours = parseInt(match[1], 10);
@@ -78,7 +100,9 @@ async function getAudioDuration(ffmpeg: any, inputFileName: string): Promise<num
       const seconds = parseFloat(match[3]);
       duration = hours * 3600 + minutes * 60 + seconds;
     }
-  });
+  };
+
+  ffmpeg.on('log', logHandler);
 
   try {
     await ffmpeg.exec(['-i', inputFileName, '-f', 'null', '-t', '0.1', '-']);
@@ -89,13 +113,16 @@ async function getAudioDuration(ffmpeg: any, inputFileName: string): Promise<num
   return duration || 600; // Default to 10 minutes if we can't detect
 }
 
+// Helper to convert File to Uint8Array
+async function fileToUint8Array(file: File): Promise<Uint8Array> {
+  const arrayBuffer = await file.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
 export async function splitAudioFile(
   file: File,
   onProgress: (progress: SplitProgress) => void
 ): Promise<AudioChunk[]> {
-  // Dynamic import fetchFile when needed
-  const { fetchFile } = await import('@ffmpeg/util');
-
   const ff = await loadFFmpeg(onProgress);
 
   onProgress({
@@ -106,7 +133,8 @@ export async function splitAudioFile(
 
   // Write input file to FFmpeg virtual filesystem
   const inputFileName = 'input' + getExtension(file.name);
-  await ff.writeFile(inputFileName, await fetchFile(file));
+  const fileData = await fileToUint8Array(file);
+  await ff.writeFile(inputFileName, fileData);
 
   // Get audio duration
   const duration = await getAudioDuration(ff, inputFileName);
