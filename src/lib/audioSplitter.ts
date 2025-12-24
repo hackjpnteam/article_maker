@@ -27,6 +27,7 @@ async function loadFFmpegFromCDN(): Promise<void> {
   if (FFmpegClass) return;
 
   // Load the FFmpeg module from unpkg CDN
+  // @ts-ignore - Dynamic import from URL is valid in browser
   const ffmpegModule = await import(
     /* webpackIgnore: true */
     'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js'
